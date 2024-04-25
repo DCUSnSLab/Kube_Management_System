@@ -13,7 +13,7 @@ def delete_pods_with_prefix(namespace, pod_name, exclude):
 
 def main():
     namespace = "swlabpods"
-    pod_name = "ssh-w"
+    pod_name = "ssh-"
     exclude = ["ssh-wldnjs269", "ssh-marsberry"]
 
     delete_pods_with_prefix(namespace, pod_name, exclude)
