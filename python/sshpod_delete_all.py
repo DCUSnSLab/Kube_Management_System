@@ -1,6 +1,6 @@
 from kubernetes import client, config
 
-def delete_pods_with_prefix(namespace, pod_name, exclude):
+def delete_pods_all(namespace, pod_name, exclude):
     config.load_kube_config()  #필수 config값 불러옴
     v1 = client.CoreV1Api()  #api
 
@@ -16,7 +16,7 @@ def main():
     pod_name = "ssh-"
     exclude = ["ssh-wldnjs269", "ssh-marsberry"]
 
-    delete_pods_with_prefix(namespace, pod_name, exclude)
+    delete_pods_all(namespace, pod_name, exclude)
 
 if __name__ == '__main__':
     main()
