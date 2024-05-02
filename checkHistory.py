@@ -20,7 +20,7 @@ class CheckHistory():
         # 7일이상 경과 시 False
         if y > 0 or m > 0:
             return False
-        if d > 7:
+        if d > 30:
             return False
         else:
             return True
