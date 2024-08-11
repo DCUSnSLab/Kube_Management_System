@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, timedelta
 
 class LastUseTime():
@@ -20,7 +21,6 @@ class LastUseTime():
         이를 읽기 쉽도록 변환해줘야함
         '''
         time = datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"convert time : {time}")
         return time
 
     def convertTime(self, time):
@@ -45,15 +45,29 @@ class LastUseTime():
         print("Compare....")
         nowTime = self.nowTime()
         lastTime = self.lastTime()
-        print(f"Time : {nowTime - lastTime}")
+        print(f"Now: {self.checkTimestamp(nowTime)}")
+        print(f"Last Time: {self.checkTimestamp(lastTime)}")
+
         diffTime = nowTime - lastTime
 
         year, month, day = self.convertDay(diffTime)
         hour, minute, second = self.convertTime(diffTime)
         print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
 
+
+
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("command: python3 check_file_time.py <history or touch>")
+        sys.exit(1)
     # 파일 경로
-    touch_file = os.path.expanduser("~/.system/touch.dat")
+    if sys.argv[1] == "history":
+        touch_file = os.path.expanduser("~/.bash_history")
+    elif sys.argv[1] == "touch":
+        touch_file = os.path.expanduser("~/.profiling/.touch.dat")
+    else :
+        print("command: python3 check_file_time.py <history or touch>")
+        sys.exit(1)
+
     lt = LastUseTime(touch_file)
     lt.compareTime()
