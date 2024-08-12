@@ -6,6 +6,7 @@ class LastUseTime():
     def __init__(self, type):
         self.filepath = self.loadfile(type)
         self.compareTime()
+
     def loadfile(self,type):
         # 파일 경로
         if type == "history":
@@ -68,5 +69,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("command: python3 check_file_time.py <history or touch>")
         sys.exit(1)
-
     lt = LastUseTime(sys.argv[1])
