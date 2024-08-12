@@ -5,17 +5,16 @@ from datetime import datetime, timedelta
 class LastUseTime():
     def __init__(self, type):
         self.filepath = self.loadfile(type)
-
+        self.compareTime()
     def loadfile(self,type):
         # 파일 경로
         if type == "history":
-            self.filepath = os.path.expanduser("~/.bash_history")
+            return os.path.expanduser("~/.bash_history")
         elif type == "touch":
-            self.filepath = os.path.expanduser("~/.profiling/.touch.dat")
+            return os.path.expanduser("~/.profiling/.touch.dat")
         else:
             print("command: python3 check_file_time.py <history or touch>")
             sys.exit(1)
-        self.compareTime()
 
     def nowTime(self):
         # 현재 시스템은 utc기준
