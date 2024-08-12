@@ -1,0 +1,30 @@
+vim check_history.py
+vim check_history.py\
+python3 check_history.py 
+vim check_history.py\
+vim check_history.py
+python3 check_history.py 
+vim check_history.py
+python3 check_history.py 
+vim check_history.py
+python3 check_history.py 
+vim check_history.py
+python3 check_history.py 
+vim check_history.py
+python3 check_history.py 
+exit
+cd .profiling
+ls -al
+cat .rec
+car .rec_latest 
+cat .rec_latest 
+ls al
+ls -al
+ls -al 
+ls -al
+cat .rec_latest 
+cat .rec
+exit
+cd Kube_Management_System/history
+python3 check_history.py 
+exit

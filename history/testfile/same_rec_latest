@@ -1,0 +1,30 @@
+mkdir testfile
+cd testfile/
+ls -al
+ls a-l
+ls -al
+mv .rec diff_rec
+mv .rec_latest diff_rec_latest
+ls a-l
+ls -al
+cd ..
+vim check_history.py 
+python3 check_history.py 
+cd testfile/
+ls -al
+cat diff_rec
+cat diff_rec_latest 
+exit
+cd .profiling
+ls -al
+cat .rec_latest 
+cat .rec
+ls -al
+cp .rec ../Kube_Management_System/history/testfile/
+ls -al
+cat .rec
+cat .rec_latest 
+cp .rec_latest ../Kube_Management_System/history/testfile/
+cat .rec
+cat .rec_latest 
+exit
