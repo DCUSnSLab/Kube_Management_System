@@ -54,8 +54,6 @@ class LastUseTime():
         hour, minute, second = self.convertTime(diffTime)
         print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
 
-
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("command: python3 check_file_time.py <history or touch>")
