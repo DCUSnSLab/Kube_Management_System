@@ -12,14 +12,13 @@ class GarbageCollector():
         self.exclude = ["ssh-wldnjs269", "swlabssh"]
         self.ver_test = ["ssh-test", "ssh-stutest"]
 
-        self.listPods()
 
     def listPods(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
             list_pods = self.v1.list_namespaced_pod(self.namespace)
             for pod in list_pods.items:
-                print(pod.metadata)
+                print(pod.metadata.name)
                 self.checkStatus(pod)
         else:
             list_pods = self.v1.list_namespaced_pod(self.namespace)
