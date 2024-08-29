@@ -2,8 +2,8 @@ import os
 import sys
 
 class checkHistory():
-    def __init__(self, isDegug=False):
-        self.DegugMode = isDegug
+    def __init__(self, isDebug=False):
+        self.DegugMode = isDebug
         self.bash_history = self.load_file("~/.bash_history")
         self.file = self.load_file("~/.profiling/.rec")
         self.previousFile = self.load_file("~/.profiling/.rec_latest")
@@ -67,5 +67,5 @@ class checkHistory():
             print("There are records added.")
 
 if __name__ == "__main__":
-    ch = checkHistory(isDegug=False)
+    ch = checkHistory(isDebug=False)
     ch.start()
