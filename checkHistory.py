@@ -37,7 +37,6 @@ class CheckHistory():
                                          stderr=True, stdin=False,
                                          stdout=True, tty=False)
             last = int(exec_command.strip())
-            print(last)
             return last
         except FileNotFoundError as e:
             print("File not found")
