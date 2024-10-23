@@ -18,16 +18,22 @@ class CheckHistory():
         # last = os.path.getmtime(self.file)
         # 유닉스
         command = ["stat", "-c", "%Y", self.file]
-        exec_command = stream.stream(self.v1.connect_get_namespaced_pod_exec,
-                                     self.pod.metadata.name,
-                                     self.namespace,
-                                     command=command,
-                                     stderr=True, stdin=False,
-                                     stdout=True, tty=False)
-        last = int(exec_command.strip())
-        print(last)
-        return last
-
+        try:
+            exec_command = stream.stream(self.v1.connect_get_namespaced_pod_exec,
+                                         self.pod.metadata.name,
+                                         self.namespace,
+                                         command=command,
+                                         stderr=True, stdin=False,
+                                         stdout=True, tty=False)
+            last = int(exec_command.strip())
+            print(last)
+            return last
+        except FileNotFoundError as e:
+            print("File not found")
+            return None
+        except Exception as e:
+            print(f"occured error: {e}")
+            return None
     def checkTimestamp(self, time):
         '''
         운영제체 별로 날짜/시간을 표현하는 방식이 다르며 유닉스와 리눅스는 1970-01-01 00:00:00부터 현재 시간까지의 초를 누적한 시간을 사용
