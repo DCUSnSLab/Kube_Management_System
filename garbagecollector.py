@@ -41,7 +41,7 @@ class GarbageCollector():
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items
-        if not pods.items:
+        if not pods:
             print(f"No resources found in {self.namespace} namespace.")
             return
         #제외할 pod 필터링
