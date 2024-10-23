@@ -1,22 +1,6 @@
 from kubernetes import client, config
 from kubernetes.stream import stream
-from checkHistory import CheckHistory
-
-class Pod():
-    def __init__(self, api, pod):
-        self.api = api
-        self.pod = pod
-        self.pod_name = pod.metadata.name
-        self.namespace = pod.metadata.namespace
-
-    def getHistory(self):
-        #히스토리를 들고오도록 만듫고, manage에서 비교결과값 가져오도록 수정
-        ch = CheckHistory(self.api, self.pod, self.namespace)
-        return ch.getResult()
-
-    def getProcess(self):
-        #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
-        pass
+from pod import Pod
 
 class GarbageCollector():
     def __init__(self, namespace='default', container=None, isDev=False):
@@ -37,7 +21,7 @@ class GarbageCollector():
 
         for p in self.podlist:
             print(p.pod_name)
-            print(p.getHistory())
+            print(p.getResultHistory())
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items

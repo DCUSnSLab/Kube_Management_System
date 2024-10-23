@@ -9,10 +9,21 @@ class CheckHistory():
         self.pod = pod
         self.namespace = namespace
 
-    def getNowTime(self):
-        # 현재 시스템은 utc기준
-        now = datetime.now().timestamp()
-        return now
+    def getResult(self):
+        # 사용하지않는다고 판단하면 false
+        filetime = self.getLastUseTime()
+        if filetime == None:
+            # file이 없는경우
+            # 접속을 했으나, 사용중이거나 제대로 종료하지않으면 파일이 없음
+            return True
+        y, m, d = self.compareTime(filetime)
+        # 7일이상 경과 시 False
+        if y > 0 or m > 0:
+            return False
+        if d > 7:
+            return False
+        else:
+            return True
 
     def getLastUseTime(self):
         # last = os.path.getmtime(self.file)
@@ -34,13 +45,21 @@ class CheckHistory():
         except Exception as e:
             print(f"occured error: {e}")
             return None
-    def checkTimestamp(self, time):
-        '''
-        운영제체 별로 날짜/시간을 표현하는 방식이 다르며 유닉스와 리눅스는 1970-01-01 00:00:00부터 현재 시간까지의 초를 누적한 시간을 사용
-        이를 읽기 쉽도록 변환해줘야함
-        '''
-        time = datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S')
-        return time
+
+    def getNowTime(self):
+        # 현재 시스템은 utc기준
+        now = datetime.now().timestamp()
+        return now
+
+    def compareTime(self, last_time):
+        # print("Compare....")
+        now_time = self.getNowTime()
+        diff_time = now_time - last_time
+
+        year, month, day = self.convertDay(diff_time)
+        hour, minute, second = self.convertTime(diff_time)
+        print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
+        return year, month, day
 
     def convertDay(self, time):
         time = timedelta(seconds=time)
@@ -60,25 +79,10 @@ class CheckHistory():
         second %= 60
         return hour, minute, second
 
-    def compareTime(self):
-        print("Compare....")
-        now_time = self.getNowTime()
-        last_time = self.getLastUseTime()
-        # print(f"Now: {self.checkTimestamp(now_time)}")
-        # print(f"Last Time: {self.checkTimestamp(last_time)}")
-
-        diff_time = now_time - last_time
-
-        year, month, day = self.convertDay(diff_time)
-        hour, minute, second = self.convertTime(diff_time)
-        print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
-        return year, month, day
-
-    def getResult(self):
-        y, m, d = self.compareTime()
-        if y > 0 or m > 0:
-            return False
-        if d > 7:
-            return False
-        else:
-            return True
+    def checkTimestamp(self, time):
+        '''
+        운영제체 별로 날짜/시간을 표현하는 방식이 다르며 유닉스와 리눅스는 1970-01-01 00:00:00부터 현재 시간까지의 초를 누적한 시간을 사용
+        이를 읽기 쉽도록 변환해줘야함
+        '''
+        time = datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S')
+        return time
