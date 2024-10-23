@@ -2,6 +2,22 @@ from kubernetes import client, config
 from kubernetes.stream import stream
 from history.checkHistory import CheckHistory
 
+class Pod():
+    def __init__(self, api, pod):
+        self.api = api
+        self.pod = pod
+        self.pod_name = pod.metadata.name
+        self.namespace = pod.metadata.namespace
+
+    def getHistory(self):
+        #히스토리를 들고오도록 만듫고, manage에서 비교결과값 가져오도록 수정
+        ch = CheckHistory(self.v1, self.pod, self.namespace)
+        return ch.getResult()
+
+    def getProcess(self):
+        #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
+        pass
+
 class GarbageCollector():
     def __init__(self, namespace='default', container=None, isDev=False):
         config.load_kube_config()  # 필수 config값 불러옴
@@ -11,22 +27,31 @@ class GarbageCollector():
         self.devMode = isDev
         self.exclude = ["ssh-wldnjs269", "swlabssh"]
         self.ver_test = ["ssh-test", "ssh-stutest"]
+        self.podlist = []
 
-        self.listPods()
-
-    def listPods(self):
+    def manage(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
-            list_pods = self.v1.list_namespaced_pod(self.namespace)
-            for pod in list_pods.items:
-                print(pod.metadata)
-                self.checkStatus(pod)
+            self.listPods()
         else:
-            list_pods = self.v1.list_namespaced_pod(self.namespace)
-            for pod in list_pods.items:
-                if pod.metadata.name not in self.exclude[0] and not pod.metadata.name.startswith(self.exclude[1]):
-                    print(pod.metadata.name)
-                    self.checkStatus(pod)
+            self.listPods()
+
+        for p in self.podlist:
+            print(p.getHistory())
+
+    def listPods(self):
+        pods = self.v1.list_namespaced_pod(self.namespace).items
+        filtering_pods = [
+            pod for pod in pods
+            if not any(
+                pod.metadata.name == name or pod.metadata.name.startswith(name)
+                for name in self.exclude
+            )
+        ]
+        for p in filtering_pods:
+            pod_instance = Pod(self.v1, p)
+            self.podlist.append(pod_instance)
+
     def execTest(self, pod):
         #exec
         command = ["ls", "-al", ".bash_history"]
@@ -39,13 +64,13 @@ class GarbageCollector():
         print(exec_commmand)
 
     def checkStatus(self, pod):
-        ch = CheckHistory(self.v1, pod, self.namespace)
-        result = ch.getResult()
-        if not result:
-            print(f"Not used for more than 7 days.\nDelete pod {pod.metadata.name} now.\n" + "-" * 50)
-            self.deletePod(pod)
-        else:
-            print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
+        pass
+        #true = 사용, false = idle
+        # if not result:
+        #     print(f"Not used for more than 7 days.\nDelete pod {pod.metadata.name} now.\n" + "-" * 50)
+        #     self.deletePod(pod)
+        # else:
+        #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
 
     def deletePod(self, pod):
         pod_name = pod.metadata.name
@@ -55,5 +80,5 @@ class GarbageCollector():
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
-    gc=GarbageCollector(namespace='swlabpods', isDev=True)
-    gc.listPods()
+    gc = GarbageCollector(namespace='swlabpods', isDev=True)
+    gc.manage()
