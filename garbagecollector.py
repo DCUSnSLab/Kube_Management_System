@@ -26,7 +26,6 @@ class GarbageCollector():
         self.container = container
         self.devMode = isDev
         self.exclude = ["ssh-wldnjs269", "swlabssh"]
-        self.ver_test = ["ssh-test", "ssh-stutest"]
         self.podlist = []
 
     def manage(self):
@@ -41,6 +40,10 @@ class GarbageCollector():
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items
+        if not pods.items:
+            print(f"No resources found in {self.namespace} namespace.")
+            return
+        #제외할 pod 필터링
         filtering_pods = [
             pod for pod in pods
             if not any(
@@ -53,9 +56,8 @@ class GarbageCollector():
             self.podlist.append(pod_instance)
 
     def execTest(self, pod):
-        #exec
+        #exec test
         command = ["ls", "-al", ".bash_history"]
-        #bash history 확인?
         exec_commmand = stream.stream(self.v1.connect_get_namespaced_pod_exec,
                                       name=pod.name,
                                       namespace=self.namespace,
@@ -75,8 +77,6 @@ class GarbageCollector():
     def deletePod(self, pod):
         pod_name = pod.metadata.name
         self.v1.delete_namespaced_pod(pod_name, self.namespace)
-
-
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
