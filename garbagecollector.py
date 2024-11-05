@@ -21,7 +21,8 @@ class GarbageCollector():
 
         for p in self.podlist:
             print(p.pod_name)
-            print(p.getResultHistory())
+            p.getResultHistory()
+            p.getResultProcess()
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items

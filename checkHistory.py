@@ -3,13 +3,13 @@ from datetime import datetime, timedelta
 from kubernetes import client, config, stream
 
 class CheckHistory():
-    def __init__(self, api_instance, pod, namespace):
+    def __init__(self, api_instance, pod):
         self.file = "/home/dcuuser/.bash_history"
         self.v1 = api_instance
         self.pod = pod
-        self.namespace = namespace
+        self.namespace = pod.metadata.namespace
 
-    def getResult(self):
+    def run(self):
         # 사용하지않는다고 판단하면 false
         filetime = self.getLastUseTime()
         if filetime == None:
