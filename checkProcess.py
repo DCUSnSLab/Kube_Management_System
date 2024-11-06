@@ -7,11 +7,10 @@ class CheckProcess:
         self.namespace = pod.metadata.namespace
 
     def run(self):
-        self.getProcess()
         pass
 
-    def getProcess(self):
-        command = ["cat", "-c", "%Y", self.file]
+    def getProcStat(self):
+        command = ["sh", "-c", "ls -d /proc/[0-9]* | xargs -I {} sh -c 'cat {}/stat 2>/dev/null'"]
         try:
             exec_command = stream.stream(self.v1.connect_get_namespaced_pod_exec,
                                          self.pod.metadata.name,
@@ -19,9 +18,7 @@ class CheckProcess:
                                          command=command,
                                          stderr=True, stdin=False,
                                          stdout=True, tty=False)
-            print(exec_command)
             return exec_command
         except Exception as e:
             print(f"occured error: {e}")
             return None
-

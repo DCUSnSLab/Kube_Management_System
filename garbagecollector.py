@@ -21,8 +21,10 @@ class GarbageCollector():
 
         for p in self.podlist:
             print(p.pod_name)
-            p.getResultHistory()
-            p.getResultProcess()
+            # p.getResultHistory()
+
+            p.insertProcessData()
+            # p.getResultProcess()
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items
@@ -66,5 +68,5 @@ class GarbageCollector():
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
-    gc = GarbageCollector(namespace='swlabpods', isDev=True)
+    gc = GarbageCollector(namespace='swlabpods', isDev=False)
     gc.manage()
