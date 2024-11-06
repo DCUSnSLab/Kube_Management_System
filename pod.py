@@ -12,7 +12,7 @@ class Pod():
         self.processes = list()
 
     def sendResult(self):
-
+        pass
 
     def getResultHistory(self):
         # manage에서 비교결과값을 가져오도록
