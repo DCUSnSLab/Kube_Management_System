@@ -1,6 +1,8 @@
 from process import Process, Mode_State, Policy_State
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
+from datetime import datetime
+import os
 
 class Pod():
     def __init__(self, api, pod):
@@ -37,7 +39,7 @@ class Pod():
 
             # Map fields to Process attributes
             p.pid = int(fields[0])
-            p.comm = fields[1]
+            p.comm = fields[1].strip('()')
             p.state = Mode_State[fields[2]].value
             p.ppid = int(fields[3])
             p.pgrp = int(fields[4])
@@ -91,8 +93,62 @@ class Pod():
 
             self.processes.append(p)
 
-        self.printProcList()
+        # self.printProcList()
+        self.saveDataToCSV()
 
     def printProcList(self):
+        print('-'*50)
         for p in self.processes:
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
+        print('-' * 50)
+
+    def saveDataToCSV(self):
+        log_path = "/home/squirtle/Kube_Management_System/logging"
+        date = datetime.now().strftime("%Y-%m-%d")
+        date_dir = os.path.join(log_path, date)
+        os.makedirs(date_dir, exist_ok=True)
+
+        file_name = os.path.join(date_dir, f"{self.pod_name}.csv")
+
+        headers = [
+            "timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
+            "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime",
+            "priority", "nice", "num_threads", "itrealvalue", "starttime", "vsize", "rss",
+            "rsslim", "startcode", "endcode", "startstack", "kstkesp", "kstkeip", "signal",
+            "blocked", "sigignore", "sigcatch", "wchan", "nswap", "cnswap", "exit_signal",
+            "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
+            "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end",
+            "env_start", "env_end", "exit_code"
+        ]
+        file_exists = os.path.exists(file_name)
+
+        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            if not file_exists:
+                file.write(",".join(headers) + "\n")  # 헤더 추가
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            for process in self.processes:
+                field_values = [
+                    timestamp,
+                    str(process.pid), process.comm, process.state, str(process.ppid),
+                    str(process.pgrp), str(process.session), str(process.tty_nr),
+                    str(process.tpgid), str(process.flags), str(process.minflt),
+                    str(process.cminflt), str(process.majflt), str(process.cmajflt),
+                    str(process.utime), str(process.stime), str(process.cutime),
+                    str(process.cstime), str(process.priority), str(process.nice),
+                    str(process.num_threads), str(process.itrealvalue),
+                    str(process.starttime), str(process.vsize), str(process.rss),
+                    str(process.rsslim), str(process.startcode), str(process.endcode),
+                    str(process.startstack), str(process.kstkesp), str(process.kstkeip),
+                    str(process.signal), str(process.blocked), str(process.sigignore),
+                    str(process.sigcatch), str(process.wchan), str(process.nswap),
+                    str(process.cnswap), str(process.exit_signal), str(process.processor),
+                    str(process.rt_priority), process.policy, str(process.delayacct_blkio_ticks),
+                    str(process.guest_time), str(process.cguest_time), str(process.start_data),
+                    str(process.end_data), str(process.start_brk), str(process.arg_start),
+                    str(process.arg_end), str(process.env_start), str(process.env_end),
+                    str(process.exit_code)
+                ]
+                file.write(",".join(field_values) + "\n")
+            file.write("\n")
