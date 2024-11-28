@@ -30,7 +30,12 @@ class Pod():
         # return cpResult
         pass
 
+    def resetProcessList(self):
+        self.processes = []
+
     def insertProcessData(self):
+        self.resetProcessList()
+
         cp = CheckProcess(self.api, self.pod)
         process_data = cp.getProcStat().splitlines()
         for line in process_data:
@@ -94,7 +99,6 @@ class Pod():
             self.processes.append(p)
 
         # self.printProcList()
-        self.saveDataToCSV()
 
     def printProcList(self):
         print('-'*50)

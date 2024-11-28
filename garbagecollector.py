@@ -1,6 +1,7 @@
 from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
+from datetime import datetime
 import time
 
 class GarbageCollector():
@@ -27,13 +28,15 @@ class GarbageCollector():
             p_obj.getResultHistory()
 
             p_obj.insertProcessData()
+            # p_obj.saveDataToCSV()
             # p.getResultProcess()
-            
+
     def logging(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
         while True:
-            print("Update Pod List...")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{timestamp} Update Pod List...")
             self.listPods()
             print('-'*10+f"Start to Check Process Data {self.count} times"+'-'*10)
             for p_name, p_obj in self.podlist.items():
