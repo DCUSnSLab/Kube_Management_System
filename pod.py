@@ -40,10 +40,17 @@ class Pod():
         process_data = cp.getProcStat().splitlines()
         for line in process_data:
             fields = line.split()
+            if len(fields) < 2:  # 최소 2개의 필드가 있어야 함
+                continue
+
             p = Process()
 
             # Map fields to Process attributes
-            p.pid = int(fields[0])
+            try:
+                p.pid = int(fields[0])
+            except ValueError:
+                print(f"Skipping invalid PID in line: {line}")
+                continue
             p.comm = fields[1].strip('()')
             p.state = Mode_State[fields[2]].value
             p.ppid = int(fields[3])
