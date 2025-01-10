@@ -37,8 +37,12 @@ class Pod():
         self.resetProcessList()
 
         cp = CheckProcess(self.api, self.pod)
-        process_data = cp.getProcStat().splitlines()
-        for line in process_data:
+        process_data = cp.getProcStat()
+        if process_data is None:
+            print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
+            return
+
+        for line in process_data.splitlines():
             fields = line.split()
             if len(fields) < 2:  # 최소 2개의 필드가 있어야 함
                 continue

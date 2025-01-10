@@ -24,7 +24,10 @@ class CheckProcess:
             )
             return self._filter_sh_xargs(exec_command)
         except Exception as e:
-            print(f"occured error: {e}")
+            if "Connection to remote host was lost" in str(e):
+                print(f"Connection to Pod '{self.pod.metadata.name}' was lost. Skipping this Pod.")
+            else:
+                print(f"An unexpected error occurred: {e}")
             return None
 
     def _filter_sh_xargs(self, exec_command):
