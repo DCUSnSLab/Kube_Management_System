@@ -38,6 +38,7 @@ class Pod():
 
         cp = CheckProcess(self.api, self.pod)
         process_data = cp.getProcStat()
+        # 명령어의 결과값이 None일 경우 건너뛰도록
         if process_data is None:
             print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
             return
