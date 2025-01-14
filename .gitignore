@@ -160,3 +160,5 @@ cython_debug/
 .idea/
 
 logging
+
+process_data.db

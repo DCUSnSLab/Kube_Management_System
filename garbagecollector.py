@@ -1,6 +1,8 @@
 from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
+from processDB import initialize_database
+
 from datetime import datetime
 import time
 
@@ -42,7 +44,9 @@ class GarbageCollector():
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
                 p_obj.insertProcessData()
-                p_obj.saveDataToCSV()
+                # save logging data
+                # p_obj.saveDataToCSV()
+                p_obj.saveDataToDB()
             print("Clear!!")
             self.count+=1
             time.sleep(self.intervalTime)
@@ -101,6 +105,7 @@ class GarbageCollector():
         self.v1.delete_namespaced_pod(pod_name, self.namespace)
 
 if __name__ == "__main__":
+    initialize_database()  # DB 초기화
     #네임스페이스 값을 비워두면 'default'로 지정
     gc = GarbageCollector(namespace='swlabpods', isDev=False)
     # gc.manage()
