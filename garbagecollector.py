@@ -1,6 +1,11 @@
 from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
+from processDB import initialize_database
+# from processDB_postgresql import ProcessDatabase
+
+from datetime import datetime
+import time
 
 class GarbageCollector():
     def __init__(self, namespace='default', container=None, isDev=False):
@@ -9,8 +14,10 @@ class GarbageCollector():
         self.namespace = namespace
         self.container = container
         self.devMode = isDev
-        self.exclude = ["ssh-wldnjs269", "swlabssh"]
-        self.podlist = []
+        self.exclude = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
+        self.podlist = {}
+        self.intervalTime = 600
+        self.count = 1
 
     def manage(self):
         if self.devMode is True:
@@ -19,17 +26,37 @@ class GarbageCollector():
         else:
             self.listPods()
 
-        for p in self.podlist:
-            print(p.pod_name)
-            # p.getResultHistory()
+        for p_name, p_obj in self.podlist.items():
+            print(p_name)
+            p_obj.getResultHistory()
 
-            p.insertProcessData()
+            p_obj.insertProcessData()
             # p.getResultProcess()
+
+    def logging(self):
+        if self.devMode is True:
+            self.namespace = 'swlabpods-gc'
+
+        while True:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{timestamp} Update Pod List...")
+            self.listPods()
+            print('-'*10+f"Start to Check Process Data {self.count} times"+'-'*10)
+            for p_name, p_obj in self.podlist.items():
+                print(p_name)
+                p_obj.insertProcessData()
+                # save logging data
+                p_obj.saveDataToCSV()
+                p_obj.saveDataToDB()
+            print("Clear!!")
+            self.count+=1
+            time.sleep(self.intervalTime)
 
     def listPods(self):
         pods = self.v1.list_namespaced_pod(self.namespace).items
         if not pods:
             print(f"No resources found in {self.namespace} namespace.")
+            self.podlist = {}
             return
         #제외할 pod 필터링
         filtering_pods = [
@@ -39,9 +66,21 @@ class GarbageCollector():
                 for name in self.exclude
             )
         ]
+        new_podlist = {}
         for p in filtering_pods:
-            pod_instance = Pod(self.v1, p)
-            self.podlist.append(pod_instance)
+            pod_name = p.metadata.name
+            if pod_name in self.podlist:
+                #기존 Pod객체 재사용
+                new_podlist[pod_name] = self.podlist[pod_name]
+            else:
+                new_podlist[pod_name] = Pod(self.v1, p)
+
+        removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
+        # 제거된 pod 목록을 출력할뿐 지워도 무관
+        for rm_p in removed_pod:
+            print(f"Pod removed: {rm_p}")
+        # 새로운 목록으로 변경
+        self.podlist = new_podlist
 
     def execTest(self, pod):
         #exec test
@@ -67,6 +106,12 @@ class GarbageCollector():
         self.v1.delete_namespaced_pod(pod_name, self.namespace)
 
 if __name__ == "__main__":
+    initialize_database()  # DB 초기화 (sqlite)
+
+    # db = ProcessDatabase() # postgresql
+    # db.initialize_database()
+
     #네임스페이스 값을 비워두면 'default'로 지정
     gc = GarbageCollector(namespace='swlabpods', isDev=False)
-    gc.manage()
+    # gc.manage()
+    gc.logging()

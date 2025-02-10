@@ -1,6 +1,10 @@
 from process import Process, Mode_State, Policy_State
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
+from processDB import save_to_database
+
+from datetime import datetime
+import os
 
 class Pod():
     def __init__(self, api, pod):
@@ -28,16 +32,33 @@ class Pod():
         # return cpResult
         pass
 
+    def resetProcessList(self):
+        self.processes = []
+
     def insertProcessData(self):
+        self.resetProcessList()
+
         cp = CheckProcess(self.api, self.pod)
-        process_data = cp.getProcStat().splitlines()
-        for line in process_data:
+        process_data = cp.getProcStat()
+        # 명령어의 결과값이 None일 경우 건너뛰도록
+        if process_data is None:
+            print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
+            return
+
+        for line in process_data.splitlines():
             fields = line.split()
+            if len(fields) < 2:  # 최소 2개의 필드가 있어야 함
+                continue
+
             p = Process()
 
             # Map fields to Process attributes
-            p.pid = int(fields[0])
-            p.comm = fields[1]
+            try:
+                p.pid = int(fields[0])
+            except ValueError:
+                print(f"Skipping invalid PID in line: {line}")
+                continue
+            p.comm = fields[1].strip('()')
             p.state = Mode_State[fields[2]].value
             p.ppid = int(fields[3])
             p.pgrp = int(fields[4])
@@ -91,8 +112,125 @@ class Pod():
 
             self.processes.append(p)
 
-        self.printProcList()
+        # self.printProcList()
 
     def printProcList(self):
+        print('-'*50)
         for p in self.processes:
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
+        print('-' * 50)
+
+    def saveDataToCSV(self):
+        log_path = "/home/squirtle/Kube_Management_System/logging"
+        date = datetime.now().strftime("%Y-%m-%d")
+        date_dir = os.path.join(log_path, date)
+        os.makedirs(date_dir, exist_ok=True)
+
+        file_name = os.path.join(date_dir, f"{self.pod_name}.csv")
+
+        headers = [
+            "timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
+            "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime",
+            "priority", "nice", "num_threads", "itrealvalue", "starttime", "vsize", "rss",
+            "rsslim", "startcode", "endcode", "startstack", "kstkesp", "kstkeip", "signal",
+            "blocked", "sigignore", "sigcatch", "wchan", "nswap", "cnswap", "exit_signal",
+            "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
+            "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end",
+            "env_start", "env_end", "exit_code"
+        ]
+        file_exists = os.path.exists(file_name)
+
+        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            if not file_exists:
+                file.write(",".join(headers) + "\n")  # 헤더 추가
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            for process in self.processes:
+                field_values = [
+                    timestamp,
+                    str(process.pid), process.comm, process.state, str(process.ppid),
+                    str(process.pgrp), str(process.session), str(process.tty_nr),
+                    str(process.tpgid), str(process.flags), str(process.minflt),
+                    str(process.cminflt), str(process.majflt), str(process.cmajflt),
+                    str(process.utime), str(process.stime), str(process.cutime),
+                    str(process.cstime), str(process.priority), str(process.nice),
+                    str(process.num_threads), str(process.itrealvalue),
+                    str(process.starttime), str(process.vsize), str(process.rss),
+                    str(process.rsslim), str(process.startcode), str(process.endcode),
+                    str(process.startstack), str(process.kstkesp), str(process.kstkeip),
+                    str(process.signal), str(process.blocked), str(process.sigignore),
+                    str(process.sigcatch), str(process.wchan), str(process.nswap),
+                    str(process.cnswap), str(process.exit_signal), str(process.processor),
+                    str(process.rt_priority), process.policy, str(process.delayacct_blkio_ticks),
+                    str(process.guest_time), str(process.cguest_time), str(process.start_data),
+                    str(process.end_data), str(process.start_brk), str(process.arg_start),
+                    str(process.arg_end), str(process.env_start), str(process.env_end),
+                    str(process.exit_code)
+                ]
+                file.write(",".join(field_values) + "\n")
+            file.write("\n")
+
+    def saveDataToDB(self):
+        # 현재 Pod의 프로세스 데이터를 데이터베이스에 저장
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        processes = []
+
+        for process in self.processes:
+            processes.append({
+                "timestamp": timestamp,
+                "pid": process.pid,
+                "comm": process.comm,
+                "state": process.state,
+                "ppid": process.ppid,
+                "pgrp": process.pgrp,
+                "session": process.session,
+                "tty_nr": process.tty_nr,
+                "tpgid": process.tpgid,
+                "flags": process.flags,
+                "minflt": process.minflt,
+                "cminflt": process.cminflt,
+                "majflt": process.majflt,
+                "cmajflt": process.cmajflt,
+                "utime": process.utime,
+                "stime": process.stime,
+                "cutime": process.cutime,
+                "cstime": process.cstime,
+                "priority": process.priority,
+                "nice": process.nice,
+                "num_threads": process.num_threads,
+                "itrealvalue": process.itrealvalue,
+                "starttime": process.starttime,
+                "vsize": process.vsize,
+                "rss": process.rss,
+                "rsslim": process.rsslim,
+                "startcode": process.startcode,
+                "endcode": process.endcode,
+                "startstack": process.startstack,
+                "kstkesp": process.kstkesp,
+                "kstkeip": process.kstkeip,
+                "signal": process.signal,
+                "blocked": process.blocked,
+                "sigignore": process.sigignore,
+                "sigcatch": process.sigcatch,
+                "wchan": process.wchan,
+                "nswap": process.nswap,
+                "cnswap": process.cnswap,
+                "exit_signal": process.exit_signal,
+                "processor": process.processor,
+                "rt_priority": process.rt_priority,
+                "policy": process.policy,
+                "delayacct_blkio_ticks": process.delayacct_blkio_ticks,
+                "guest_time": process.guest_time,
+                "cguest_time": process.cguest_time,
+                "start_data": process.start_data,
+                "end_data": process.end_data,
+                "start_brk": process.start_brk,
+                "arg_start": process.arg_start,
+                "arg_end": process.arg_end,
+                "env_start": process.env_start,
+                "env_end": process.env_end,
+                "exit_code": process.exit_code
+            })
+
+        save_to_database(self.pod_name, processes)
