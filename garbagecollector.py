@@ -41,13 +41,15 @@ class GarbageCollector():
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} Update Pod List...")
             self.listPods()
-            print('-'*10+f"Start to Check Process Data {self.count} times"+'-'*10)
+            print('='*10+f"Start to Check Process Data {self.count} times"+'='*10)
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
                 p_obj.insertProcessData()
+                p_obj.getResultHistory()
                 # save logging data
                 p_obj.saveDataToCSV()
                 p_obj.saveDataToDB()
+                print('-' * 50)
             print("Clear!!")
             self.count+=1
             time.sleep(self.intervalTime)

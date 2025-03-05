@@ -9,9 +9,9 @@ class CheckHistory():
         self.pod = pod
         self.namespace = pod.metadata.namespace
 
-    def run(self):
+    def run(self, filetime):
         # 사용하지않는다고 판단하면 false
-        filetime = self.getLastUseTime()
+        # filetime = self.getLastUseTime()
         if filetime == None:
             # file이 없는경우
             # 접속을 했으나, 사용중이거나 제대로 종료하지않으면 파일이 없음
@@ -57,7 +57,7 @@ class CheckHistory():
 
         year, month, day = self.convertDay(diff_time)
         hour, minute, second = self.convertTime(diff_time)
-        print('-' * 50)
+        # print('-' * 50)
         print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
         return year, month, day
 

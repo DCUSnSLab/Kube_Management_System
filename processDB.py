@@ -72,6 +72,16 @@ def initialize_database():
             exit_code INTEGER
         )
         """)
+        # Bash history 정보를 저장할 새로운 테이블 생성
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bash_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,  -- 각 기록을 고유하게 식별
+            pod_name TEXT,  
+            last_modified TEXT,  -- bash_history의 마지막 수정 시간
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP  -- 데이터 저장된 시간
+        )
+        """)
+
         conn.commit()
     except sqlite3.OperationalError as e:
         logging.error(f"SQLite OperationalError: {e}")
@@ -130,3 +140,55 @@ def save_to_database(pod_name, processes, max_retries=5, retry_delay=5):
         time.sleep(retry_delay)  # 일정 시간 대기 후 재시도
 
     logging.error(f"Failed to insert data after {max_retries} retries.")
+
+def save_bash_history(pod_name, last_modified):
+    # Bash history의 마지막 수정 시간을 DB에 저장
+    try:
+        conn = sqlite3.connect("process_data.db")
+        cursor = conn.cursor()
+
+        # 가장 최신의 last_modified 값을 가져옴
+        cursor.execute("""
+        SELECT last_modified FROM bash_history WHERE pod_name = ? ORDER BY id DESC LIMIT 1
+        """, (pod_name,))
+        last_saved = cursor.fetchone()
+
+        # 기존 값과 다를 경우에만 저장
+        if last_saved is None or last_saved[0] != last_modified:
+            cursor.execute("""
+            INSERT INTO bash_history (pod_name, last_modified)
+            VALUES (?, ?)
+            """, (pod_name, last_modified))
+            conn.commit()
+            print(f"Saved new bash history for pod: {pod_name}")
+
+    except sqlite3.OperationalError as e:
+        logging.error(f"SQLite OperationalError: {e}")
+    except sqlite3.Error as e:
+        logging.error(f"SQLite Error: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def get_last_bash_history(pod_name):
+    # 해당 pod_name에 대한 가장 최근의 bash_history 값을 반환
+    try:
+        conn = sqlite3.connect("process_data.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        SELECT last_modified FROM bash_history WHERE pod_name = ? ORDER BY id DESC LIMIT 1
+        """, (pod_name,))
+        last_saved = cursor.fetchone()
+
+        return last_saved[0] if last_saved else None
+
+    except sqlite3.OperationalError as e:
+        logging.error(f"SQLite OperationalError: {e}")
+        return None
+    except sqlite3.Error as e:
+        logging.error(f"SQLite Error: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()

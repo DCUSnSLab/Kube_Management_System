@@ -1,7 +1,7 @@
 from process import Process, Mode_State, Policy_State
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
-from processDB import save_to_database
+from processDB import save_to_database, get_last_bash_history, save_bash_history
 
 from datetime import datetime
 import os
@@ -21,8 +21,27 @@ class Pod():
     def getResultHistory(self):
         # manage에서 비교결과값을 가져오도록
         ch = CheckHistory(self.api, self.pod)
-        self.check_history_result = ch.run()
+        lastTime_Bash_history=ch.getLastUseTime()
+        self.check_history_result = ch.run(lastTime_Bash_history)
         print(self.check_history_result)
+
+        if lastTime_Bash_history is not None:
+            self.lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
+            self.saveBash_history(ch, self.lastTimeStamp_Bash_history)
+
+        return self.check_history_result
+
+    def saveBash_history(self, ch, last_modified_time):
+        if last_modified_time is None:
+            print(f"No bash_history found for pod: {self.pod_name}")
+            return
+
+        last_saved = get_last_bash_history(self.pod_name)
+        if last_saved is None or last_saved != last_modified_time:
+            print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")
+            save_bash_history(self.pod_name, last_modified_time)
+        else:
+            print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
 
     def getResultProcess(self):
         #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
