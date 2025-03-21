@@ -1,8 +1,8 @@
 from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
-from processDB import initialize_database
-# from processDB_postgresql import ProcessDatabase
+# from processDB import initialize_database
+from processDB_postgresql import initialize_database
 
 from datetime import datetime
 import time
@@ -16,15 +16,13 @@ class GarbageCollector():
         self.devMode = isDev
         self.exclude = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
         self.podlist = {}
-        self.intervalTime = 600
+        self.intervalTime = 60
         self.count = 1
 
     def manage(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
-            self.listPods()
-        else:
-            self.listPods()
+        self.listPods()
 
         for p_name, p_obj in self.podlist.items():
             print(p_name)
@@ -46,20 +44,25 @@ class GarbageCollector():
                 print(p_name)
                 p_obj.insertProcessData()
                 p_obj.getResultHistory()
+
                 # save logging data
                 p_obj.saveDataToCSV()
                 p_obj.saveDataToDB()
+
                 print('-' * 50)
+
             print("Clear!!")
             self.count+=1
             time.sleep(self.intervalTime)
 
     def listPods(self):
+        #현재 네임스테이스의 Pod 목록을 가져옴
         pods = self.v1.list_namespaced_pod(self.namespace).items
         if not pods:
             print(f"No resources found in {self.namespace} namespace.")
             self.podlist = {}
             return
+
         #제외할 pod 필터링
         filtering_pods = [
             pod for pod in pods
@@ -108,10 +111,8 @@ class GarbageCollector():
         self.v1.delete_namespaced_pod(pod_name, self.namespace)
 
 if __name__ == "__main__":
-    initialize_database()  # DB 초기화 (sqlite)
-
-    # db = ProcessDatabase() # postgresql
-    # db.initialize_database()
+    # initialize_database()  # DB 초기화 (sqlite)
+    initialize_database()  # PostgreSQL DB 초기화
 
     #네임스페이스 값을 비워두면 'default'로 지정
     gc = GarbageCollector(namespace='swlabpods', isDev=False)
