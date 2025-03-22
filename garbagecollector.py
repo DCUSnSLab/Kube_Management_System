@@ -19,19 +19,19 @@ class GarbageCollector():
         self.intervalTime = 60
         self.count = 1
 
+    # def manage(self):
+    #     if self.devMode is True:
+    #         self.namespace = 'swlabpods-gc'
+    #     self.listPods()
+    #
+    #     for p_name, p_obj in self.podlist.items():
+    #         print(p_name)
+    #         p_obj.getResultHistory()
+    #
+    #         p_obj.insertProcessData()
+    #         # p.getResultProcess()
+
     def manage(self):
-        if self.devMode is True:
-            self.namespace = 'swlabpods-gc'
-        self.listPods()
-
-        for p_name, p_obj in self.podlist.items():
-            print(p_name)
-            p_obj.getResultHistory()
-
-            p_obj.insertProcessData()
-            # p.getResultProcess()
-
-    def logging(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
 
@@ -116,5 +116,5 @@ if __name__ == "__main__":
 
     #네임스페이스 값을 비워두면 'default'로 지정
     gc = GarbageCollector(namespace='swlabpods', isDev=False)
-    # gc.manage()
-    gc.logging()
+    gc.manage()
+    # gc.logging()

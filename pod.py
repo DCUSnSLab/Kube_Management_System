@@ -1,7 +1,12 @@
 from process import Process, Mode_State, Policy_State
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
-from processDB import save_to_database, get_last_bash_history, save_bash_history
+# from processDB import save_to_database, get_last_bash_history, save_bash_history
+from processDB_postgresql import (
+    save_to_database,
+    get_last_bash_history,
+    save_bash_history
+)
 
 from datetime import datetime
 import os
