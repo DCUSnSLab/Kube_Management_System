@@ -8,8 +8,8 @@ DATABASE_CONFIG = {
     "dbname": "gc-data",
     "user": "k8s_gc",
     "password": "snslab",
-    "host": "203.250.35.87",  # 또는 실제 서버 주소
-    "port": "31855"
+    "host": "localhost",  # 또는 실제 서버 주소
+    "port": "5432"
 }
 
 def get_db_connection():
