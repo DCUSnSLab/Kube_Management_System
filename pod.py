@@ -3,7 +3,7 @@ from checkHistory import CheckHistory
 from checkProcess import CheckProcess
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
 from processDB_postgresql import (
-    save_to_database,
+    save_to_process,
     get_last_bash_history,
     save_bash_history
 )
@@ -257,4 +257,4 @@ class Pod():
                 "exit_code": process.exit_code
             })
 
-        save_to_database(self.pod_name, processes)
+        save_to_process(self.pod_name, processes)

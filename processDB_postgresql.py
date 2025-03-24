@@ -19,8 +19,13 @@ def get_db_connection():
 def initialize_database():
     """PostgreSQL 데이터베이스 초기화 및 테이블 생성"""
     conn = None
+
     try:
         conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
         cursor = conn.cursor()
 
         # 프로세스 정보를 저장할 테이블 생성
@@ -101,10 +106,16 @@ def initialize_database():
         if conn:
             conn.close()
 
-def save_to_database(pod_name, processes):
+def save_to_process(pod_name, processes):
     """PostgreSQL에 프로세스 데이터 저장"""
+    conn = None
+
     try:
         conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None  # 연결 실패 시 None 반환
+
         cursor = conn.cursor()
 
         insert_query = """
@@ -147,8 +158,14 @@ def save_to_database(pod_name, processes):
 
 def save_bash_history(pod_name, last_modified):
     """PostgreSQL에 bash_history 데이터 저장"""
+    conn = None
+
     try:
         conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None  # 연결 실패 시 None 반환
+
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -165,8 +182,14 @@ def save_bash_history(pod_name, last_modified):
 
 def get_last_bash_history(pod_name):
     """PostgreSQL에서 해당 pod의 마지막 bash_history 수정 시간을 가져옴"""
+    conn = None
+
     try:
         conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None  # 연결 실패 시 None 반환
+
         cursor = conn.cursor()
 
         cursor.execute("""
