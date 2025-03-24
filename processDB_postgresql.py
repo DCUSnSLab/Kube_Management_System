@@ -1,15 +1,19 @@
 import psycopg2
 import logging
+import configparser
 
 logging.basicConfig(filename="error.log", level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
+config = configparser.ConfigParser()
+config.read("config.ini")
+
 # PostgreSQL 설정
 DATABASE_CONFIG = {
-    "dbname": "gc-data",
-    "user": "k8s_gc",
-    "password": "snslab",
-    "host": "localhost",  # 또는 실제 서버 주소
-    "port": "5432"
+    "dbname": config["database"]["dbname"],
+    "user": config["database"]["user"],
+    "password": config["database"]["password"],
+    "host": config["database"]["host"],  # localhost 또는 실제 서버 주소
+    "port": config["database"]["port"]
 }
 
 def get_db_connection():
