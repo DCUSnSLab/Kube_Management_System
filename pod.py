@@ -1,4 +1,5 @@
 from process import Process, Mode_State, Policy_State
+from poddata import PodData, gcData
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
@@ -19,6 +20,36 @@ class Pod():
         self.namespace = pod.metadata.namespace
         self.check_history_result = None
         self.processes = list()
+
+    def insertPodData(self):
+        p = PodData()
+
+        p.name = self.pod_name
+        p.namespace = self.namespace
+        p.uid = self.pod.metadata.uid
+        p.labels = self.pod.metadata.labels
+        p.annotations = self.pod.metadata.annotations
+        p.creation_timestamp = self.pod.metadata.creation_timestamp
+        p.deletion_timestamp = self.pod.metadata.deletion_timestamp
+        p.generate_name = self.pod.metadata.generate_name
+        p.owner_references = self.pod.metadata.owner_references
+        p.finalizers = self.pod.metadata.finalizers
+        p.managed_fields = self.pod.metadata.managed_fields
+
+        p.volumes = self.pod.spec.volumes
+        p.containers = self.pod.spec.containers
+        p.node_name = self.pod.spec.node_name
+
+        p.phase = self.pod.status.phase
+        p.conditions = self.pod.status.conditions
+        p.hostIP = self.pod.status.host_ip
+        p.podIP = self.pod.status.pod_ip
+        p.startTime = self.pod.status.start_time
+
+        g = gcData()
+        g.podname = self.pod_name
+        g.createTime = p.creation_timestamp
+        g.deleteTime = p.deletion_timestamp
 
     def sendResult(self):
         pass
@@ -42,11 +73,15 @@ class Pod():
             return
 
         last_saved = get_last_bash_history(self.pod_name)
-        if last_saved is None or last_saved != last_modified_time:
+
+        if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
             print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")
             save_bash_history(self.pod_name, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
+
+    def parse_timestamp(self, timestamp):
+        return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
 
     def getResultProcess(self):
         #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용

@@ -18,7 +18,11 @@ DATABASE_CONFIG = {
 
 def get_db_connection():
     """PostgreSQL 연결 생성"""
-    return psycopg2.connect(**DATABASE_CONFIG)
+    try:
+        return psycopg2.connect(**DATABASE_CONFIG)
+    except psycopg2.Error as e:
+        logging.error(f"Database connection error: {e}")
+        return None
 
 def initialize_database():
     """PostgreSQL 데이터베이스 초기화 및 테이블 생성"""
@@ -124,40 +128,45 @@ def save_to_process(pod_name, processes):
 
         insert_query = """
         INSERT INTO process_data (
-            pod_name, timestamp, pid, comm, state, ppid, pgrp, session, tty_nr, tpgid, flags,
-            minflt, cminflt, majflt, cmajflt, utime, stime, cutime, cstime, priority,
-            nice, num_threads, itrealvalue, starttime, vsize, rss, rsslim, startcode,
-            endcode, startstack, kstkesp, kstkeip, signal, blocked, sigignore, sigcatch,
-            wchan, nswap, cnswap, exit_signal, processor, rt_priority, policy,
-            delayacct_blkio_ticks, guest_time, cguest_time, start_data, end_data,
-            start_brk, arg_start, arg_end, env_start, env_end, exit_code
+            pod_name, timestamp, pid, comm, state, ppid, pgrp, session, tty_nr, tpgid,
+            flags, minflt, cminflt, majflt, cmajflt, utime, stime, cutime, cstime, priority,
+            nice, num_threads, itrealvalue, starttime, vsize, rss, rsslim, startcode, endcode, startstack,
+            kstkesp, kstkeip, signal, blocked, sigignore, sigcatch, wchan, nswap, cnswap, exit_signal,
+            processor, rt_priority, policy, delayacct_blkio_ticks, guest_time, cguest_time, start_data, end_data, start_brk, arg_start,
+            arg_end, env_start, env_end, exit_code
         ) VALUES (
-            %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        );
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s
+        )
         """
 
         for process in processes:
-            cursor.execute(insert_query, (
-                pod_name, process['pid'], process['comm'], process['state'],
+            values = (
+                pod_name, process['timestamp'], process['pid'], process['comm'], process['state'],
                 process['ppid'], process['pgrp'], process['session'], process['tty_nr'], process['tpgid'],
                 process['flags'], process['minflt'], process['cminflt'], process['majflt'], process['cmajflt'],
                 process['utime'], process['stime'], process['cutime'], process['cstime'], process['priority'],
-                process['nice'], process['num_threads'], process['itrealvalue'], process['starttime'],
-                process['vsize'], process['rss'], str(process['rsslim']), str(process['startcode']),
-                str(process['endcode']), str(process['startstack']), process['kstkesp'], process['kstkeip'],
-                process['signal'], process['blocked'], process['sigignore'], process['sigcatch'], process['wchan'],
-                process['nswap'], process['cnswap'], process['exit_signal'], process['processor'], process['rt_priority'],
-                process['policy'], process['delayacct_blkio_ticks'], process['guest_time'], process['cguest_time'],
-                str(process['start_data']), str(process['end_data']), str(process['start_brk']),
-                str(process['arg_start']), str(process['arg_end']), str(process['env_start']),
-                str(process['env_end']), process['exit_code']
-            ))
+                process['nice'], process['num_threads'], process['itrealvalue'], process['starttime'], process['vsize'],
+                process['rss'], process['rsslim'], process['startcode'], process['endcode'], process['startstack'],
+                process['kstkesp'], process['kstkeip'], process['signal'], process['blocked'], process['sigignore'],
+                process['sigcatch'], process['wchan'], process['nswap'], process['cnswap'], process['exit_signal'],
+                process['processor'], process['rt_priority'], process['policy'], process['delayacct_blkio_ticks'],
+                process['guest_time'], process['cguest_time'], process['start_data'], process['end_data'],
+                process['start_brk'],
+                process['arg_start'], process['arg_end'], process['env_start'], process['env_end'], process['exit_code']
+            )
 
+            cursor.execute(insert_query, values)
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
+            cursor.close()
             conn.close()
 
 def save_bash_history(pod_name, last_modified):
@@ -182,6 +191,7 @@ def save_bash_history(pod_name, last_modified):
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
+            cursor.close()
             conn.close()
 
 def get_last_bash_history(pod_name):

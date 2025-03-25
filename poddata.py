@@ -23,5 +23,9 @@ class PodData:
         self.podIP = None
         self.startTime = None  # pod start time
 
+class gcData:
+    def __init__(self):
+        self.podname = None
+        self.createTime = None  # pod 생성 시간
         self.deleteTIme = None  # pod 삭제 시간
         self.reason_deletion = None  # Reason for pod deletion
