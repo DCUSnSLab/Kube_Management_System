@@ -2,7 +2,7 @@ from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
 # from processDB import initialize_database
-from processDB_postgresql import initialize_database
+from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
 
 from datetime import datetime
 import time
@@ -43,11 +43,15 @@ class GarbageCollector():
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
                 p_obj.insertProcessData()
-                p_obj.getResultHistory()
+                result_history = p_obj.getResultHistory()
 
                 # save logging data
                 p_obj.saveDataToCSV()
                 p_obj.saveDataToDB()
+
+                # if not result_history:  # 7일이상 사용하지않으면 false 반환
+                #     p_obj.insert_DeleteReason('GC_h')
+                #     self.deletePod(p_name)  # pod 삭제
 
                 print('-' * 50)
 
@@ -78,12 +82,23 @@ class GarbageCollector():
                 #기존 Pod객체 재사용
                 new_podlist[pod_name] = self.podlist[pod_name]
             else:
-                new_podlist[pod_name] = Pod(self.v1, p)
+                pod_obj = Pod(self.v1, p)
+
+                if pod_obj.is_deleted_in_DB() or not pod_obj.is_exist_in_DB():
+                    pod_obj.init_pod_data()
+                    print(f"Initializing data for Pod: {pod_name}")
+
+                new_podlist[pod_name] = pod_obj
 
         removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
-        # 제거된 pod 목록을 출력할뿐 지워도 무관
+
         for rm_p in removed_pod:
+            pod_obj = self.podlist[rm_p]
+            if not pod_obj.pod_name.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
+                print("????????", pod_obj.pod_name.is_deleted_in_DB())
+                pod_obj.insert_DeleteReason('UNKNOWN')  # 삭제 사유 기록
             print(f"Pod removed: {rm_p}")
+
         # 새로운 목록으로 변경
         self.podlist = new_podlist
 
@@ -106,9 +121,8 @@ class GarbageCollector():
         # else:
         #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
 
-    def deletePod(self, pod):
-        pod_name = pod.metadata.name
-        self.v1.delete_namespaced_pod(pod_name, self.namespace)
+    def deletePod(self, p_name):
+        self.v1.delete_namespaced_pod(p_name, self.namespace)
 
 if __name__ == "__main__":
     # initialize_database()  # DB 초기화 (sqlite)

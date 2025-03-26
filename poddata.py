@@ -1,8 +1,12 @@
-class PodData:
+from enum import Enum
+
+class Reason_Deletion(Enum):
+    GC_h = 'GarbageCollector - No usage history for more than a week'
+    UNKNOWN = "Pod deleted"
+
+class Pod_Info:
     def __init__(self):
         #pod.metadata
-        self.name = None  # pod name
-        self.namespace = None
         self.uid = None  # pod uid
         self.labels = None
         self.annotations = None
@@ -23,9 +27,8 @@ class PodData:
         self.podIP = None
         self.startTime = None  # pod start time
 
-class gcData:
+class Pod_Lifecycle:
     def __init__(self):
-        self.podname = None
         self.createTime = None  # pod 생성 시간
         self.deleteTIme = None  # pod 삭제 시간
         self.reason_deletion = None  # Reason for pod deletion
