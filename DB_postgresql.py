@@ -120,21 +120,12 @@ def initialize_database():
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS pod_status (
             id SERIAL PRIMARY KEY,
-            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
-            labels JSONB,
-            annotations JSONB,
+            pod_id INTEGER UNIQUE  REFERENCES pod_info(pod_id) ON DELETE CASCADE,
             creation_timestamp TIMESTAMP,
             deletion_timestamp TIMESTAMP,
             generate_name VARCHAR(255),
-            owner_references JSONB,
-            resource_version VARCHAR(255),
-            finalizers JSONB,
-            managed_fields JSONB,
-            volumes JSONB,
-            containers JSONB,
             node_name VARCHAR(255),
             phase VARCHAR(50),
-            conditions JSONB,
             host_ip VARCHAR(50),
             pod_ip VARCHAR(50),
             start_time TIMESTAMP,
@@ -146,7 +137,7 @@ def initialize_database():
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS pod_lifecycle (
             id SERIAL PRIMARY KEY,
-            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            pod_id INTEGER UNIQUE REFERENCES pod_info(pod_id) ON DELETE CASCADE,
             created_at TIMESTAMP,
             deleted_at TIMESTAMP,
             delete_reason TEXT,
@@ -174,33 +165,84 @@ def get_or_create_pod_id(pod_name, namespace):
 
         cursor = conn.cursor()
 
-        # Check pod_name exists and if exists same pod_name, check deleted time
+        # Check pod_name exists and
         cursor.execute("""
-            SELECT pod_id, deletion_timestamp FROM pod_status 
-            JOIN pod_info ON pod_status.pod_id = pod_info.pod_id 
-            WHERE pod_name = %s ORDER BY pod_status.id DESC LIMIT 1;
-        """, (pod_name,))
+        SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;
+        """, (pod_name, namespace))
 
         pod_data = cursor.fetchone()
 
-        if pod_data:
-            existing_pod_id, deletion_timestamp = pod_data
-            if deletion_timestamp is None:
-                # 기존 pod_name이 있고 삭제된 적이 없으면, 기존 pod_id 반환
+        if pod_data:  # if exists same pod_name, check deleted time
+            existing_pod_id = pod_data[0]
+
+            # pod_lifecycle 테이블에서 해당 pod_id의 deleted_at 확인
+            cursor.execute("""
+            SELECT deleted_at FROM pod_lifecycle WHERE pod_id = %s ORDER BY created_at DESC LIMIT 1;
+            """, (existing_pod_id,))
+            lifecycle_data = cursor.fetchone()
+
+            if lifecycle_data:
+                deleted_at = lifecycle_data[0]
+                if deleted_at is None:
+                    # 삭제된 적 없는 기존 pod_id 반환
+                    logging.info(f"Existing pod_id returned: {existing_pod_id} for pod {pod_name}")
+                    print("기존 id 반환합니다.")
+                    return existing_pod_id
+                else:
+                    # 삭제된 기록이 있으면 새로 생성
+                    logging.info(f"Pod {pod_name} was previously deleted. Creating a new entry.")
+
+            else:
+                # lifecycle 정보가 아예 없으면 기존 pod_id 반환 (중복 생성 방지)
+                logging.info(f"Pod {pod_name} exists without lifecycle data. Using existing pod_id: {existing_pod_id}")
                 return existing_pod_id
 
         # No exist or deleted
+        print("새로 만듭니다")
         cursor.execute("""
-            INSERT INTO pod_info (pod_name, namespace) 
-            VALUES (%s, %s) RETURNING pod_id;
+        INSERT INTO pod_info (pod_name, namespace) 
+        VALUES (%s, %s) RETURNING pod_id;
         """, (pod_name, namespace))
 
         new_pod_id = cursor.fetchone()[0]
         conn.commit()
 
+        logging.info(f"New pod inserted into DB: {pod_name}, namespace: {namespace}, pod_id: {new_pod_id}")
         return new_pod_id
 
     except psycopg2.Error as e:
+        conn.rollback()
+        logging.error(f"PostgreSQL Error: {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+def create_pod_id(pod_name, namespace):
+    """Create a new pod entry in pod_info without returning pod_id"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        # Insert new pod_info
+        cursor.execute("""
+        INSERT INTO pod_info (pod_name, namespace) 
+        VALUES (%s, %s) ON CONFLICT DO NOTHING;
+        """, (pod_name, namespace))
+
+        conn.commit()
+
+        logging.info(f"New pod created: {pod_name}, namespace: {namespace}")
+
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
@@ -221,34 +263,35 @@ def save_pod_status(pod_name, namespace, pod_info_obj):
         pod_id = get_or_create_pod_id(pod_name, namespace)
 
         insert_query = """
-            INSERT INTO pod_status (
-                pod_id, labels, annotations, creation_timestamp, deletion_timestamp,
-                generate_name, owner_references, finalizers, managed_fields,
-                volumes, containers, node_name, phase, conditions,
-                host_ip, pod_ip, start_time
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s
-            ) ON CONFLICT (pod_id) DO UPDATE
-            SET deletion_timestamp = EXCLUDED.deletion_timestamp,
-                phase = EXCLUDED.phase, host_ip = EXCLUDED.host_ip,
-                pod_ip = EXCLUDED.pod_ip, start_time = EXCLUDED.start_time;
+        INSERT INTO pod_status (
+            pod_id, creation_timestamp, deletion_timestamp,
+            generate_name, node_name, phase,
+            host_ip, pod_ip, start_time
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s
+        ) ON CONFLICT (pod_id) DO UPDATE
+        SET deletion_timestamp = EXCLUDED.deletion_timestamp,
+            phase = EXCLUDED.phase, host_ip = EXCLUDED.host_ip,
+            pod_ip = EXCLUDED.pod_ip, start_time = EXCLUDED.start_time;
         """
 
         values = (
-            pod_id, pod_info_obj.labels, pod_info_obj.annotations,
-            pod_info_obj.creation_timestamp, pod_info_obj.deletion_timestamp,
-            pod_info_obj.generate_name, pod_info_obj.owner_references,
-            pod_info_obj.finalizers, pod_info_obj.managed_fields,
-            pod_info_obj.volumes, pod_info_obj.containers, pod_info_obj.node_name,
-            pod_info_obj.phase, pod_info_obj.conditions, pod_info_obj.hostIP,
-            pod_info_obj.podIP, pod_info_obj.startTime
+            pod_id,
+            pod_info_obj.creation_timestamp,
+            pod_info_obj.deletion_timestamp,
+            pod_info_obj.generate_name,
+            pod_info_obj.node_name,
+            pod_info_obj.phase,
+            pod_info_obj.hostIP,
+            pod_info_obj.podIP,
+            pod_info_obj.startTime
         )
 
         cursor.execute(insert_query, values)
         conn.commit()
 
     except psycopg2.Error as e:
+        conn.rollback()
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
@@ -269,11 +312,12 @@ def save_pod_lifecycle(pod_name, namespace, lifecycle):
         pod_id = get_or_create_pod_id(pod_name, namespace)
 
         insert_query = """
-            INSERT INTO pod_lifecycle (
-                pod_id, created_at
-            ) VALUES (
-                %s, %s
-            ) ON CONFLICT (pod_id) DO NOTHING;
+        INSERT INTO pod_lifecycle (
+            pod_id, created_at
+        ) VALUES (
+            %s, %s
+        ) ON CONFLICT (pod_id) 
+        DO UPDATE SET created_at = EXCLUDED.created_at;
         """
 
         values = (pod_id, lifecycle.createTime)
@@ -282,6 +326,7 @@ def save_pod_lifecycle(pod_name, namespace, lifecycle):
         conn.commit()
 
     except psycopg2.Error as e:
+        conn.rollback()
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
@@ -387,14 +432,14 @@ def save_delete_resson(pod_name, namespace, reason, delete_time):
         pod_id = get_or_create_pod_id(pod_name, namespace)
 
         insert_query = """
-            INSERT INTO pod_lifecycle (
-                pod_id, deleted_at, delete_reason
-            ) VALUES (
-                %s, %s, %s
-            ) ON CONFLICT (pod_id) 
-            DO UPDATE SET 
-                deleted_at = EXCLUDED.deleted_at,
-                delete_reason = EXCLUDED.delete_reason;
+        INSERT INTO pod_lifecycle (
+            pod_id, deleted_at, delete_reason
+        ) VALUES (
+            %s, %s, %s
+        ) ON CONFLICT (pod_id) 
+        DO UPDATE SET 
+            deleted_at = EXCLUDED.deleted_at,
+            delete_reason = EXCLUDED.delete_reason;
         """
 
         values = (pod_id, delete_time, reason)
@@ -425,12 +470,22 @@ def get_last_bash_history(pod_name):
         cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
         pod_id = cursor.fetchone()
 
+        if not pod_id:
+            return None  # pod_name이 DB에 없으면 None 반환
+
+        pod_id = pod_id[0]  # 실제 pod_id 값 추출
+
         cursor.execute("""
         SELECT last_modified FROM bash_history WHERE pod_id = %s ORDER BY id DESC LIMIT 1;
-        """, (pod_name,))
+        """, (pod_id,))
+
         last_saved = cursor.fetchone()
 
-        return last_saved[0] if last_saved else None
+        if last_saved and last_saved[0]:
+            return last_saved[0]
+        else:
+            return None
+
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")
         return None
@@ -439,7 +494,7 @@ def get_last_bash_history(pod_name):
             cursor.close()
             conn.close()
 
-def is_deleted_in_DB(pod_name):
+def is_deleted_in_DB(pod_name, namespace):
     conn = None
 
     try:
@@ -475,7 +530,7 @@ def is_deleted_in_DB(pod_name):
             cursor.close()
             conn.close()
 
-def is_exist_in_DB(pod_name):
+def is_exist_in_DB(pod_name, namespace):
     conn = None
 
     try:

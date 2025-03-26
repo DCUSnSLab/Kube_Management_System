@@ -4,12 +4,14 @@ from checkHistory import CheckHistory
 from checkProcess import CheckProcess
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
 from DB_postgresql import (
+    create_pod_id,
     save_pod_status,
     save_pod_lifecycle,
     save_to_process,
     get_last_bash_history,
     save_bash_history,
-    save_delete_resson
+    save_delete_resson,
+    is_deleted_in_DB, is_exist_in_DB
 )
 
 from datetime import datetime
@@ -31,50 +33,57 @@ class Pod():
 
     def init_pod_data(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
+        create_pod_id(self.pod_name, self.namespace)
         self.insert_Pod_Info()
         self.insert_Pod_lifecycle()
         self.save_Pod_Info_to_DB()
         self.save_Pod_liftcycle_to_DB()
 
+    def is_deleted_in_DB(self):
+        """Pod이 삭제되었는지 DB에서 확인"""
+        return is_deleted_in_DB(self.pod_name, self.namespace)
+
+    def is_exist_in_DB(self):
+        """Pod이 DB에 존재하는지 확인"""
+        return is_exist_in_DB(self.pod_name, self.namespace)
+
     def insert_Pod_Info(self):
         p = Pod_Info
 
         p.uid = self.pod.metadata.uid
-        p.labels = self.pod.metadata.labels
-        p.annotations = self.pod.metadata.annotations
+        # p.labels = self.pod.metadata.labels
+        # p.annotations = self.pod.metadata.annotations
         p.creation_timestamp = self.pod.metadata.creation_timestamp
         p.deletion_timestamp = self.pod.metadata.deletion_timestamp
         p.generate_name = self.pod.metadata.generate_name
-        p.owner_references = self.pod.metadata.owner_references
-        p.finalizers = self.pod.metadata.finalizers
-        p.managed_fields = self.pod.metadata.managed_fields
+        # p.owner_references = self.pod.metadata.owner_references
+        # p.finalizers = self.pod.metadata.finalizers
+        # p.managed_fields = self.pod.metadata.managed_fields
 
-        p.volumes = self.pod.spec.volumes
-        p.containers = self.pod.spec.containers
+        # p.volumes = self.pod.spec.volumes
+        # p.containers = self.pod.spec.containers
         p.node_name = self.pod.spec.node_name
 
         p.phase = self.pod.status.phase
-        p.conditions = self.pod.status.conditions
+        # p.conditions = self.pod.status.conditions
         p.hostIP = self.pod.status.host_ip
         p.podIP = self.pod.status.pod_ip
         p.startTime = self.pod.status.start_time
 
-        self.pod_info.append(p)
+        self.pod_info = p
 
     def save_Pod_Info_to_DB(self):
-        for info in self.pod_info:
-            save_pod_status(self.pod_name, self.namespace, info)
+        save_pod_status(self.pod_name, self.namespace, self.pod_info)
 
     def insert_Pod_lifecycle(self):
         pl = Pod_Lifecycle()
 
         pl.createTime = self.pod.metadata.creation_timestamp
 
-        self.pod_lifecycle.append(pl)
+        self.pod_lifecycle = pl
 
     def save_Pod_liftcycle_to_DB(self):
-        for lifecycle in self.pod_lifecycle:
-            save_pod_lifecycle(self.pod_name, self.namespace, lifecycle)
+        save_pod_lifecycle(self.pod_name, self.namespace, self.pod_lifecycle)
 
     def insert_DeleteReason(self, reason):
         pl = Pod_Lifecycle()
@@ -104,11 +113,11 @@ class Pod():
 
         if lastTime_Bash_history is not None:
             self.lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
-            self.saveBash_history_to_DB(ch, self.lastTimeStamp_Bash_history)
+            self.saveBash_history_to_DB(self.lastTimeStamp_Bash_history)
 
         return self.check_history_result
 
-    def saveBash_history_to_DB(self, ch, last_modified_time):
+    def saveBash_history_to_DB(self, last_modified_time):
         if last_modified_time is None:
             print(f"No bash_history found for pod: {self.pod_name}")
             return
