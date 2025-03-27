@@ -141,7 +141,8 @@ def initialize_database():
             created_at TIMESTAMP,
             deleted_at TIMESTAMP,
             delete_reason TEXT,
-            history_check BOOLEAN DEFAULT FALSE
+            history_check BOOLEAN DEFAULT FALSE,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
 
@@ -218,8 +219,8 @@ def get_or_create_pod_id(pod_name, namespace):
             cursor.close()
             conn.close()
 
-def create_pod_id(pod_name, namespace):
-    """Create a new pod entry in pod_info without returning pod_id"""
+def create_first_pod_id(pod_name, namespace):
+    """Create a new pod data in pod_info"""
     conn = None
 
     try:
@@ -250,6 +251,7 @@ def create_pod_id(pod_name, namespace):
             conn.close()
 
 def save_pod_status(pod_name, namespace, pod_info_obj):
+    """Save new pod's status"""
     conn = None
 
     try:
@@ -299,6 +301,7 @@ def save_pod_status(pod_name, namespace, pod_info_obj):
             conn.close()
 
 def save_pod_lifecycle(pod_name, namespace, lifecycle):
+    """Save new pod's lifecycle (create time)"""
     conn = None
 
     try:
@@ -418,7 +421,7 @@ def save_bash_history(pod_name, namespace, last_modified):
             cursor.close()
             conn.close()
 
-def save_delete_resson(pod_name, namespace, reason, delete_time):
+def save_delete_resson(pod_name, namespace, lifecycle):
     conn = None
 
     try:
@@ -442,7 +445,7 @@ def save_delete_resson(pod_name, namespace, reason, delete_time):
             delete_reason = EXCLUDED.delete_reason;
         """
 
-        values = (pod_id, delete_time, reason)
+        values = (pod_id, lifecycle.deleteTime, lifecycle.reason_deletion)
 
         cursor.execute(insert_query, values)
 

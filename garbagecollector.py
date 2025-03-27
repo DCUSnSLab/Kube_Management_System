@@ -94,7 +94,6 @@ class GarbageCollector():
         for rm_p in removed_pod:
             pod_obj = self.podlist[rm_p]
             if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
-                print("????????", pod_obj.is_deleted_in_DB())
                 pod_obj.insert_DeleteReason('UNKNOWN')  # 삭제 사유 기록
                 pod_obj.save_DeleteReason_to_DB()
             print(f"Pod removed: {rm_p}")
