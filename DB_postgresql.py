@@ -166,37 +166,33 @@ def get_or_create_pod_id(pod_name, namespace):
 
         cursor = conn.cursor()
 
-        # Check pod_name exists and
         cursor.execute("""
-        SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;
+            SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;
         """, (pod_name, namespace))
+        pod_ids = cursor.fetchall()
 
-        pod_data = cursor.fetchone()
+        if pod_ids:
+            for (pod_id,) in pod_ids:
+                # all pod_id's lifecycle check
+                cursor.execute("""
+                    SELECT deleted_at FROM pod_lifecycle
+                    WHERE pod_id = %s ORDER BY created_at DESC LIMIT 1;
+                """, (pod_id,))
+                lifecycle = cursor.fetchone()
 
-        if pod_data:  # if exists same pod_name, check deleted time
-            existing_pod_id = pod_data[0]
-
-            # pod_lifecycle 테이블에서 해당 pod_id의 deleted_at 확인
-            cursor.execute("""
-            SELECT deleted_at FROM pod_lifecycle WHERE pod_id = %s ORDER BY created_at DESC LIMIT 1;
-            """, (existing_pod_id,))
-            lifecycle_data = cursor.fetchone()
-
-            if lifecycle_data:
-                deleted_at = lifecycle_data[0]
-                if deleted_at is None:
-                    # 삭제된 적 없는 기존 pod_id 반환
-                    logging.info(f"Existing pod_id returned: {existing_pod_id} for pod {pod_name}")
+                if lifecycle is None:
+                    # lifecycle 정보가 없다면 살아있는 것으로 간주
+                    logging.info(f"Pod {pod_name} has no lifecycle info. Using pod_id: {pod_id}")
+                    print("lifecycle 데이터가 없으므로, 기존 id 반환합니다.")
+                    return pod_id
+                elif lifecycle[0] is None:
+                    # delete time is None -> not deleted pod
+                    logging.info(f"Pod {pod_name} is active. Using pod_id: {pod_id}")
                     print("기존 id 반환합니다.")
-                    return existing_pod_id
-                else:
-                    # 삭제된 기록이 있으면 새로 생성
-                    logging.info(f"Pod {pod_name} was previously deleted. Creating a new entry.")
+                    return pod_id
 
-            else:
-                # lifecycle 정보가 아예 없으면 기존 pod_id 반환 (중복 생성 방지)
-                logging.info(f"Pod {pod_name} exists without lifecycle data. Using existing pod_id: {existing_pod_id}")
-                return existing_pod_id
+            # All pod_id have deleted time -> create pod info
+            logging.info(f"All existing pods with name {pod_name} are deleted. Creating new pod entry.")
 
         # No exist or deleted
         print("새로 만듭니다")
@@ -204,7 +200,6 @@ def get_or_create_pod_id(pod_name, namespace):
         INSERT INTO pod_info (pod_name, namespace) 
         VALUES (%s, %s) RETURNING pod_id;
         """, (pod_name, namespace))
-
         new_pod_id = cursor.fetchone()[0]
         conn.commit()
 
@@ -421,6 +416,33 @@ def save_bash_history(pod_name, namespace, last_modified):
             cursor.close()
             conn.close()
 
+def save_bash_history_result(pod_name, namespace, result):
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None  # 연결 실패 시 None 반환
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+            UPDATE pod_lifecycle
+            SET history_check = %s
+            WHERE pod_id = %s;
+        """, (result, pod_id))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error: {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
 def save_delete_resson(pod_name, namespace, lifecycle):
     conn = None
 
@@ -508,22 +530,24 @@ def is_deleted_in_DB(pod_name, namespace):
 
         cursor = conn.cursor()
 
+        # all pod_id(same pod) name check
         cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
-        pod_id = cursor.fetchone()
+        pod_ids = cursor.fetchall()
 
-        if not pod_id:
+        if not pod_ids:
             return False  # pod_name이 DB에 없다면 삭제된 것으로 간주할 필요 없음
 
-        pod_id = pod_id[0]
+        for (pod_id,) in pod_ids:
+            cursor.execute("""
+                SELECT deleted_at FROM pod_lifecycle 
+                WHERE pod_id = %s LIMIT 1;
+            """, (pod_id,))
+            result = cursor.fetchone()
 
-        # deletion_timestamp 확인
-        query = """
-            SELECT deletion_timestamp FROM pod_status WHERE pod_id = %s LIMIT 1;
-        """
-        cursor.execute(query, (pod_id,))
-        result = cursor.fetchone()
+            if result is not None and result[0] is None:
+                return False
 
-        return result is not None and result[0] is not None  # 삭제 시간이 존재하면 True, 없으면 False
+        return True  # 삭제 시간이 존재하면 True, 없으면 False
 
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")

@@ -4,7 +4,8 @@ from checkHistory import CheckHistory
 from checkProcess import CheckProcess
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
 from DB_postgresql import (
-    get_or_create_pod_id,
+    save_bash_history_result,
+    create_first_pod_id,
     save_pod_status,
     save_pod_lifecycle,
     save_to_process,
@@ -33,11 +34,11 @@ class Pod():
 
     def init_pod_data(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
-        get_or_create_pod_id(self.pod_name, self.namespace)
-        self.insert_Pod_Info()
         self.insert_Pod_lifecycle()
-        self.save_Pod_Info_to_DB()
+        self.insert_Pod_Info()
         self.save_Pod_liftcycle_to_DB()
+        self.save_Pod_Info_to_DB()
+
 
     def is_deleted_in_DB(self):
         """Pod이 삭제되었는지 DB에서 확인"""
@@ -121,6 +122,8 @@ class Pod():
             return
 
         last_saved = get_last_bash_history(self.pod_name)
+
+        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
 
         if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
             print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")

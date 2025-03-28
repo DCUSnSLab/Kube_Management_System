@@ -49,13 +49,14 @@ class GarbageCollector():
                 p_obj.saveDataToCSV()
                 p_obj.saveDataToDB()
 
-                # if not result_history:  # 7일이상 사용하지않으면 false 반환
-                #     p_obj.insert_DeleteReason('GC_h')
-                #     self.deletePod(p_name)  # pod 삭제
+                if not result_history:  # 7일이상 사용하지않으면 false 반환
+                    p_obj.insert_DeleteReason('GC_h')
+                    p_obj.save_DeleteReason_to_DB()
+                    self.deletePod(p_name)  # pod 삭제
 
                 print('-' * 50)
 
-            print("Clear!!")
+            print("Clear!!\n\n")
             self.count+=1
             time.sleep(self.intervalTime)
 
@@ -85,7 +86,7 @@ class GarbageCollector():
                 new_podlist[pod_name] = Pod(self.v1, p)
                 pod_obj = new_podlist[pod_name]
 
-                if pod_obj.is_deleted_in_DB() or not pod_obj.is_exist_in_DB():
+                if not pod_obj.is_exist_in_DB() or pod_obj.is_deleted_in_DB():
                     print(f"Initializing new pod: {pod_name}")
                     pod_obj.init_pod_data()
 
