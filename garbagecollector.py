@@ -2,7 +2,7 @@ from kubernetes import client, config
 from kubernetes.stream import stream
 from pod import Pod
 # from processDB import initialize_database
-from processDB_postgresql import initialize_database
+from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
 
 from datetime import datetime
 import time
@@ -19,19 +19,19 @@ class GarbageCollector():
         self.intervalTime = 60
         self.count = 1
 
+    # def manage(self):
+    #     if self.devMode is True:
+    #         self.namespace = 'swlabpods-gc'
+    #     self.listPods()
+    #
+    #     for p_name, p_obj in self.podlist.items():
+    #         print(p_name)
+    #         p_obj.getResultHistory()
+    #
+    #         p_obj.insertProcessData()
+    #         # p.getResultProcess()
+
     def manage(self):
-        if self.devMode is True:
-            self.namespace = 'swlabpods-gc'
-        self.listPods()
-
-        for p_name, p_obj in self.podlist.items():
-            print(p_name)
-            p_obj.getResultHistory()
-
-            p_obj.insertProcessData()
-            # p.getResultProcess()
-
-    def logging(self):
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
 
@@ -43,15 +43,20 @@ class GarbageCollector():
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
                 p_obj.insertProcessData()
-                p_obj.getResultHistory()
+                result_history = p_obj.getResultHistory()
 
                 # save logging data
                 p_obj.saveDataToCSV()
                 p_obj.saveDataToDB()
 
+                if not result_history:  # 7일이상 사용하지않으면 false 반환
+                    p_obj.insert_DeleteReason('GC_h')
+                    p_obj.save_DeleteReason_to_DB()
+                    self.deletePod(p_name)  # pod 삭제
+
                 print('-' * 50)
 
-            print("Clear!!")
+            print("Clear!!\n\n")
             self.count+=1
             time.sleep(self.intervalTime)
 
@@ -79,11 +84,21 @@ class GarbageCollector():
                 new_podlist[pod_name] = self.podlist[pod_name]
             else:
                 new_podlist[pod_name] = Pod(self.v1, p)
+                pod_obj = new_podlist[pod_name]
+
+                if not pod_obj.is_exist_in_DB() or pod_obj.is_deleted_in_DB():
+                    print(f"Initializing new pod: {pod_name}")
+                    pod_obj.init_pod_data()
 
         removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
-        # 제거된 pod 목록을 출력할뿐 지워도 무관
+
         for rm_p in removed_pod:
+            pod_obj = self.podlist[rm_p]
+            if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
+                pod_obj.insert_DeleteReason('UNKNOWN')  # 삭제 사유 기록
+                pod_obj.save_DeleteReason_to_DB()
             print(f"Pod removed: {rm_p}")
+
         # 새로운 목록으로 변경
         self.podlist = new_podlist
 
@@ -106,9 +121,8 @@ class GarbageCollector():
         # else:
         #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
 
-    def deletePod(self, pod):
-        pod_name = pod.metadata.name
-        self.v1.delete_namespaced_pod(pod_name, self.namespace)
+    def deletePod(self, p_name):
+        self.v1.delete_namespaced_pod(p_name, self.namespace)
 
 if __name__ == "__main__":
     # initialize_database()  # DB 초기화 (sqlite)
@@ -116,5 +130,5 @@ if __name__ == "__main__":
 
     #네임스페이스 값을 비워두면 'default'로 지정
     gc = GarbageCollector(namespace='swlabpods', isDev=False)
-    # gc.manage()
-    gc.logging()
+    gc.manage()
+    # gc.logging()

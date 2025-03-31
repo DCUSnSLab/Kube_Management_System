@@ -1,7 +1,19 @@
 from process import Process, Mode_State, Policy_State
+from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
-from processDB import save_to_database, get_last_bash_history, save_bash_history
+# from processDB import save_to_database, get_last_bash_history, save_bash_history
+from DB_postgresql import (
+    save_bash_history_result,
+    create_first_pod_id,
+    save_pod_status,
+    save_pod_lifecycle,
+    save_to_process,
+    get_last_bash_history,
+    save_bash_history,
+    save_delete_resson,
+    is_deleted_in_DB, is_exist_in_DB
+)
 
 from datetime import datetime
 import os
@@ -14,12 +26,84 @@ class Pod():
         self.namespace = pod.metadata.namespace
         self.check_history_result = None
         self.processes = list()
+        self.pod_status = None  # list -> obj
+        self.pod_lifecycle = None  # list -> obj
 
-    def sendResult(self):
-        pass
+    def get_Timestamp(self):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def init_pod_data(self):
+        """새로운 pod가 만들어지면, 초기 데이터 저장"""
+        self.insert_Pod_lifecycle()
+        self.insert_Pod_Info()
+        self.save_Pod_liftcycle_to_DB()
+        self.save_Pod_Info_to_DB()
+
+
+    def is_deleted_in_DB(self):
+        """Pod이 삭제되었는지 DB에서 확인"""
+        return is_deleted_in_DB(self.pod_name, self.namespace)
+
+    def is_exist_in_DB(self):
+        """Pod이 DB에 존재하는지 확인"""
+        return is_exist_in_DB(self.pod_name, self.namespace)
+
+    def insert_Pod_Info(self):
+        """pod's status save"""
+        p = Pod_Info
+
+        p.uid = self.pod.metadata.uid
+        # p.labels = self.pod.metadata.labels
+        # p.annotations = self.pod.metadata.annotations
+        p.creation_timestamp = self.pod.metadata.creation_timestamp
+        p.deletion_timestamp = self.pod.metadata.deletion_timestamp
+        p.generate_name = self.pod.metadata.generate_name
+        # p.owner_references = self.pod.metadata.owner_references
+        # p.finalizers = self.pod.metadata.finalizers
+        # p.managed_fields = self.pod.metadata.managed_fields
+
+        # p.volumes = self.pod.spec.volumes
+        # p.containers = self.pod.spec.containers
+        p.node_name = self.pod.spec.node_name
+
+        p.phase = self.pod.status.phase
+        # p.conditions = self.pod.status.conditions
+        p.hostIP = self.pod.status.host_ip
+        p.podIP = self.pod.status.pod_ip
+        p.startTime = self.pod.status.start_time
+
+        self.pod_status = p
+
+    def save_Pod_Info_to_DB(self):
+        """pod's status save to DB"""
+        save_pod_status(self.pod_name, self.namespace, self.pod_status)
+
+    def insert_Pod_lifecycle(self):
+        """Save pod's created time"""
+        pl = Pod_Lifecycle()
+        pl.createTime = self.pod.metadata.creation_timestamp
+        self.pod_lifecycle = pl
+
+    def save_Pod_liftcycle_to_DB(self):
+        """Pod's lifecycle save to DB"""
+        save_pod_lifecycle(self.pod_name, self.namespace, self.pod_lifecycle)
+
+    def insert_DeleteReason(self, reason):
+        if self.pod_lifecycle is None:
+            self.pod_lifecycle = Pod_Lifecycle()
+        """When pod deleted, save time and because of pod deleted"""
+        self.pod_lifecycle.reason_deletion = Reason_Deletion[reason].value
+        self.pod_lifecycle.deleteTime = self.get_Timestamp()
+
+    def save_DeleteReason_to_DB(self):
+        """Delete time and reason save to DB"""
+        save_delete_resson(self.pod_name, self.namespace, self.pod_lifecycle)
+
+    # def sendResult(self):
+    #     pass
 
     def getResultHistory(self):
-        # manage에서 비교결과값을 가져오도록
+        """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
         ch = CheckHistory(self.api, self.pod)
         lastTime_Bash_history=ch.getLastUseTime()
         self.check_history_result = ch.run(lastTime_Bash_history)
@@ -27,23 +111,28 @@ class Pod():
 
         if lastTime_Bash_history is not None:
             self.lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
-            self.saveBash_history(ch, self.lastTimeStamp_Bash_history)
+            self.saveBash_history_to_DB(self.lastTimeStamp_Bash_history)
 
         return self.check_history_result
 
-    def saveBash_history(self, ch, last_modified_time):
+    def saveBash_history_to_DB(self, last_modified_time):
+        """Save bash history data to DB"""
         if last_modified_time is None:
             print(f"No bash_history found for pod: {self.pod_name}")
             return
 
         last_saved = get_last_bash_history(self.pod_name)
-        if last_saved is None or last_saved != last_modified_time:
+
+        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
+
+        if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
             print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")
-            save_bash_history(self.pod_name, last_modified_time)
+            save_bash_history(self.pod_name, self.namespace, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
 
     def getResultProcess(self):
+        """process 데이터로 판별하기 위한 함수 (미완)"""
         #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
         # cp = CheckProcess(self.api, self.pod)
         # cpResult = cp.run()
@@ -55,6 +144,7 @@ class Pod():
         self.processes = []
 
     def insertProcessData(self):
+        """get /proc/stat data amd split into 52"""
         self.resetProcessList()
 
         cp = CheckProcess(self.api, self.pod)
@@ -140,6 +230,7 @@ class Pod():
         print('-' * 50)
 
     def saveDataToCSV(self):
+        """Save process data in csv file"""
         log_path = "/home/squirtle/Kube_Management_System/logging"
         date = datetime.now().strftime("%Y-%m-%d")
         date_dir = os.path.join(log_path, date)
@@ -163,7 +254,7 @@ class Pod():
             if not file_exists:
                 file.write(",".join(headers) + "\n")  # 헤더 추가
 
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = self.get_Timestamp()
 
             for process in self.processes:
                 field_values = [
@@ -191,8 +282,8 @@ class Pod():
             file.write("\n")
 
     def saveDataToDB(self):
-        # 현재 Pod의 프로세스 데이터를 데이터베이스에 저장
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """Save Pod's process data to DB"""
+        timestamp = self.get_Timestamp()
         processes = []
 
         for process in self.processes:
@@ -252,4 +343,4 @@ class Pod():
                 "exit_code": process.exit_code
             })
 
-        save_to_database(self.pod_name, processes)
+        save_to_process(self.pod_name, self.namespace, processes)
