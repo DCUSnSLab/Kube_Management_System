@@ -109,9 +109,12 @@ class Pod():
         self.check_history_result = ch.run(lastTime_Bash_history)
         print(self.check_history_result)
 
+        # pod_lifecycle에 리스토리 검사 결과 저장
+        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
+
         if lastTime_Bash_history is not None:
-            self.lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
-            self.saveBash_history_to_DB(self.lastTimeStamp_Bash_history)
+            lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
+            self.saveBash_history_to_DB(lastTimeStamp_Bash_history)
 
         return self.check_history_result
 
@@ -122,8 +125,6 @@ class Pod():
             return
 
         last_saved = get_last_bash_history(self.pod_name)
-
-        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
 
         if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
             print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")
