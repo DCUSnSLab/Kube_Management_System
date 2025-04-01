@@ -5,13 +5,12 @@ from checkProcess import CheckProcess
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
 from DB_postgresql import (
     save_bash_history_result,
-    create_first_pod_id,
     save_pod_status,
     save_pod_lifecycle,
     save_to_process,
     get_last_bash_history,
     save_bash_history,
-    save_delete_resson,
+    save_delete_reason,
     is_deleted_in_DB, is_exist_in_DB
 )
 
@@ -97,7 +96,7 @@ class Pod():
 
     def save_DeleteReason_to_DB(self):
         """Delete time and reason save to DB"""
-        save_delete_resson(self.pod_name, self.namespace, self.pod_lifecycle)
+        save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
 
     # def sendResult(self):
     #     pass
