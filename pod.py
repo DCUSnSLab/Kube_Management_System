@@ -284,7 +284,7 @@ class Pod():
                 file.write(",".join(field_values) + "\n")
             file.write("\n")
 
-    def saveDataToDB(self):
+    def saveProcessDataToDB(self):
         """Save Pod's process data to DB"""
         timestamp = self.get_Timestamp()
         processes = []
