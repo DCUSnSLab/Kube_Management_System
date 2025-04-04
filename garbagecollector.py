@@ -46,7 +46,7 @@ class GarbageCollector():
                 result_history = p_obj.getResultHistory()
 
                 # save logging data
-                p_obj.saveDataToCSV()
+                # p_obj.saveDataToCSV()
                 p_obj.saveProcessDataToDB()
 
                 if not result_history:  # 7일이상 사용하지않으면 false 반환
