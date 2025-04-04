@@ -53,7 +53,7 @@ def initialize_database():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             pid INTEGER,
             comm VARCHAR(255),
-            state VARCHAR(10),
+            state VARCHAR(20),
             ppid INTEGER,
             pgrp INTEGER,
             session INTEGER,
@@ -208,37 +208,6 @@ def get_or_create_pod_id(pod_name, namespace):
 
     except psycopg2.Error as e:
         conn.rollback()
-        logging.error(f"PostgreSQL Error: {e}")
-    finally:
-        if conn:
-            cursor.close()
-            conn.close()
-
-def create_first_pod_id(pod_name, namespace):
-    """Create a new pod data in pod_info"""
-    conn = None
-
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            logging.error("Database connection failed")
-            return
-
-        cursor = conn.cursor()
-
-        # Insert new pod_info
-        cursor.execute("""
-        INSERT INTO pod_info (pod_name, namespace) 
-        VALUES (%s, %s) ON CONFLICT DO NOTHING;
-        """, (pod_name, namespace))
-
-        conn.commit()
-
-        logging.info(f"New pod created: {pod_name}, namespace: {namespace}")
-
-    except psycopg2.Error as e:
-        if conn:
-            conn.rollback()
         logging.error(f"PostgreSQL Error: {e}")
     finally:
         if conn:
@@ -417,6 +386,7 @@ def save_bash_history(pod_name, namespace, last_modified):
             conn.close()
 
 def save_bash_history_result(pod_name, namespace, result):
+    """save result checked hisotry in pod_lifecycle """
     conn = None
 
     try:
@@ -431,7 +401,8 @@ def save_bash_history_result(pod_name, namespace, result):
 
         cursor.execute("""
             UPDATE pod_lifecycle
-            SET history_check = %s
+            SET history_check = %s,
+                last_updated = CURRENT_TIMESTAMP
             WHERE pod_id = %s;
         """, (result, pod_id))
 
@@ -443,7 +414,7 @@ def save_bash_history_result(pod_name, namespace, result):
             cursor.close()
             conn.close()
 
-def save_delete_resson(pod_name, namespace, lifecycle):
+def save_delete_reason(pod_name, namespace, lifecycle):
     conn = None
 
     try:
@@ -464,7 +435,8 @@ def save_delete_resson(pod_name, namespace, lifecycle):
         ) ON CONFLICT (pod_id) 
         DO UPDATE SET 
             deleted_at = EXCLUDED.deleted_at,
-            delete_reason = EXCLUDED.delete_reason;
+            delete_reason = EXCLUDED.delete_reason,
+            last_updated = CURRENT_TIMESTAMP;
         """
 
         values = (pod_id, lifecycle.deleteTime, lifecycle.reason_deletion)
