@@ -168,7 +168,10 @@ class Pod():
                 print(f"Skipping invalid PID in line: {line}")
                 continue
             p.comm = fields[1].strip('()')
-            p.state = Mode_State[fields[2]].value
+            try:  # for undefined code
+                p.state = Mode_State[fields[2]].value
+            except KeyError:
+                p.state = f"Unknown({fields[2]})"
             p.ppid = int(fields[3])
             p.pgrp = int(fields[4])
             p.session = int(fields[5])
