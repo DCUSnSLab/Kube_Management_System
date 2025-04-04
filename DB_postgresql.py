@@ -53,7 +53,7 @@ def initialize_database():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             pid INTEGER,
             comm VARCHAR(255),
-            state VARCHAR(30),
+            state VARCHAR(20),
             ppid INTEGER,
             pgrp INTEGER,
             session INTEGER,
