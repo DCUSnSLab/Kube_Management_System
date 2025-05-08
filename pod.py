@@ -98,9 +98,6 @@ class Pod():
         """Delete time and reason save to DB"""
         save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
 
-    # def sendResult(self):
-    #     pass
-
     def getResultHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
         ch = CheckHistory(self.api, self.pod)
