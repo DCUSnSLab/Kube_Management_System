@@ -14,7 +14,7 @@ from DB_postgresql import (
     is_deleted_in_DB, is_exist_in_DB
 )
 
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 class Pod():
@@ -29,7 +29,8 @@ class Pod():
         self.pod_lifecycle = None  # list -> obj
 
     def get_Timestamp(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """시간대를 UTC로 통일"""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     def init_pod_data(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
