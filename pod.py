@@ -14,7 +14,7 @@ from DB_postgresql import (
     is_deleted_in_DB, is_exist_in_DB
 )
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 
 class Pod():
@@ -128,6 +128,15 @@ class Pod():
             save_bash_history(self.pod_name, self.namespace, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
+
+    def checkCreateTime(self):
+        """
+        pod 생성된 지 7일이 지났는지 확인 후 반환
+        """
+        creation_time = self.pod_status.creation_timestamp
+        now = datetime.now(creation_time.tzinfo)
+        result = (now - creation_time) > timedelta(days=7)
+        return result
 
     def getResultProcess(self):
         """process 데이터로 판별하기 위한 함수 (미완)"""

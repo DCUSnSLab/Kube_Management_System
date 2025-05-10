@@ -49,7 +49,7 @@ class GarbageCollector():
                 # p_obj.saveDataToCSV()
                 p_obj.saveProcessDataToDB()
 
-                if not result_history:  # 7일이상 사용하지않으면 false 반환
+                if not result_history and p_obj.checkCreateTime:  # 7일이상 사용하지않으면 false 반환
                     p_obj.insert_DeleteReason('GC_h')
                     p_obj.save_DeleteReason_to_DB()
                     self.deletePod(p_name)  # pod 삭제
