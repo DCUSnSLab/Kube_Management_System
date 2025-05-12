@@ -43,13 +43,14 @@ class GarbageCollector():
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
                 p_obj.insertProcessData()
+                p_obj.insert_Pod_Info()
                 result_history = p_obj.getResultHistory()
 
                 # save logging data
                 # p_obj.saveDataToCSV()
                 p_obj.saveProcessDataToDB()
 
-                if not result_history and p_obj.checkCreateTime:  # 7일이상 사용하지않으면 false 반환
+                if not result_history and p_obj.checkCreateTime():  # 7일이상 사용하지않으면 false 반환
                     p_obj.insert_DeleteReason('GC_h')
                     p_obj.save_DeleteReason_to_DB()
                     self.deletePod(p_name)  # pod 삭제
@@ -122,6 +123,7 @@ class GarbageCollector():
         #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
 
     def deletePod(self, p_name):
+        print(p_name, "______REMOVE____")
         self.v1.delete_namespaced_pod(p_name, self.namespace)
 
 if __name__ == "__main__":
