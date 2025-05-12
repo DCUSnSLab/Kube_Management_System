@@ -14,7 +14,7 @@ from DB_postgresql import (
     is_deleted_in_DB, is_exist_in_DB
 )
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
 
 class Pod():
@@ -29,7 +29,8 @@ class Pod():
         self.pod_lifecycle = None  # list -> obj
 
     def get_Timestamp(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """시간대를 UTC로 통일"""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     def init_pod_data(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
@@ -98,9 +99,6 @@ class Pod():
         """Delete time and reason save to DB"""
         save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
 
-    # def sendResult(self):
-    #     pass
-
     def getResultHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
         ch = CheckHistory(self.api, self.pod)
@@ -130,6 +128,15 @@ class Pod():
             save_bash_history(self.pod_name, self.namespace, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
+
+    def checkCreateTime(self):
+        """
+        pod 생성된 지 7일이 지났는지 확인 후 반환
+        """
+        creation_time = self.pod_status.creation_timestamp
+        now = datetime.now(creation_time.tzinfo)
+        result = (now - creation_time) > timedelta(days=7)
+        return result
 
     def getResultProcess(self):
         """process 데이터로 판별하기 위한 함수 (미완)"""
