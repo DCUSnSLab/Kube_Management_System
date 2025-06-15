@@ -2,18 +2,6 @@ from process import Process, Mode_State, Policy_State
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from checkHistory import CheckHistory
 from checkProcess import CheckProcess
-# from processDB import save_to_database, get_last_bash_history, save_bash_history
-from DB_postgresql import (
-    save_bash_history_result,
-    save_pod_status,
-    save_pod_lifecycle,
-    save_to_process,
-    get_last_bash_history,
-    save_bash_history,
-    save_delete_reason,
-    is_deleted_in_DB, is_exist_in_DB
-)
-
 from datetime import datetime, timezone, timedelta
 import os
 
@@ -38,15 +26,6 @@ class Pod():
         self.insert_Pod_Info()
         self.save_Pod_liftcycle_to_DB()
         self.save_Pod_Info_to_DB()
-
-
-    def is_deleted_in_DB(self):
-        """Pod이 삭제되었는지 DB에서 확인"""
-        return is_deleted_in_DB(self.pod_name, self.namespace)
-
-    def is_exist_in_DB(self):
-        """Pod이 DB에 존재하는지 확인"""
-        return is_exist_in_DB(self.pod_name, self.namespace)
 
     def insert_Pod_Info(self):
         """pod's status save"""
@@ -74,19 +53,11 @@ class Pod():
 
         self.pod_status = p
 
-    def save_Pod_Info_to_DB(self):
-        """pod's status save to DB"""
-        save_pod_status(self.pod_name, self.namespace, self.pod_status)
-
     def insert_Pod_lifecycle(self):
         """Save pod's created time"""
         pl = Pod_Lifecycle()
         pl.createTime = self.pod.metadata.creation_timestamp
         self.pod_lifecycle = pl
-
-    def save_Pod_liftcycle_to_DB(self):
-        """Pod's lifecycle save to DB"""
-        save_pod_lifecycle(self.pod_name, self.namespace, self.pod_lifecycle)
 
     def insert_DeleteReason(self, reason):
         if self.pod_lifecycle is None:
@@ -95,39 +66,19 @@ class Pod():
         self.pod_lifecycle.reason_deletion = Reason_Deletion[reason].value
         self.pod_lifecycle.deleteTime = self.get_Timestamp()
 
-    def save_DeleteReason_to_DB(self):
-        """Delete time and reason save to DB"""
-        save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
-
     def getResultHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
         ch = CheckHistory(self.api, self.pod)
         lastTime_Bash_history=ch.getLastUseTime()
         self.check_history_result = ch.run(lastTime_Bash_history)
-        print(self.check_history_result)
+        #print(self.check_history_result)
 
         # pod_lifecycle에 리스토리 검사 결과 저장
-        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
 
         if lastTime_Bash_history is not None:
             lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
-            self.saveBash_history_to_DB(lastTimeStamp_Bash_history)
 
         return self.check_history_result
-
-    def saveBash_history_to_DB(self, last_modified_time):
-        """Save bash history data to DB"""
-        if last_modified_time is None:
-            print(f"No bash_history found for pod: {self.pod_name}")
-            return
-
-        last_saved = get_last_bash_history(self.pod_name)
-
-        if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
-            print(f"New bash_history detected for pod: {self.pod_name}, saving to DB.")
-            save_bash_history(self.pod_name, self.namespace, last_modified_time)
-        else:
-            print(f"No changes in bash_history for pod: {self.pod_name}, skipping DB save.")
 
     def checkCreateTime(self):
         """
@@ -156,7 +107,7 @@ class Pod():
 
         cp = CheckProcess(self.api, self.pod)
         process_data = cp.getProcStat()
-        # 명령어의 결과값이 None일 경우 건너뛰도록
+        #명령어의 결과값이 None일 경우 건너뛰도록
         if process_data is None:
             print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
             return
@@ -231,13 +182,18 @@ class Pod():
 
             self.processes.append(p)
 
-        # self.printProcList()
+        self.printProcList()
 
     def printProcList(self):
-        print('-'*50)
+        #print('-'*50)
         for p in self.processes:
-            print(p.comm, p.state, p.pid, p.ppid, p.policy)
-        print('-' * 50)
+            #if p.comm == 'test1':
+                #p.print_all_fields()
+            #print()
+            #print('----------------------------------------------------------------------------------------------------------------')
+            print(p.comm, p.state, p.pid, p.ppid, p.policy, p.vsize, p.rss)
+            #
+        #print('-' * 50)
 
     def saveDataToCSV(self):
         """Save process data in csv file"""
@@ -352,5 +308,3 @@ class Pod():
                 "env_end": process.env_end,
                 "exit_code": process.exit_code
             })
-
-        save_to_process(self.pod_name, self.namespace, processes)

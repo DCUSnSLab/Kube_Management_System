@@ -71,3 +71,7 @@ class Process:
 
         self.env_end = None  # Address of end of environment variables
         self.exit_code = None  # Process exit code
+
+    def print_all_fields(self):
+        for field, value in self.__dict__.items():
+            print(f"{field}: {value}")

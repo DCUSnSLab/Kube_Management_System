@@ -58,7 +58,7 @@ class CheckHistory():
         year, month, day = self.convertDay(diff_time)
         hour, minute, second = self.convertTime(diff_time)
         # print('-' * 50)
-        print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
+        #print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
         return year, month, day
 
     def convertDay(self, time):
