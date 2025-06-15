@@ -52,20 +52,12 @@ class Simulator:
         Create pod
         """
         cnt = 0
-
         #active pod
-        while cnt < 5:
+        while cnt < 15:
             self.pod_manifest['metadata']['name'] = 'experiment-active-'+str(cnt)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'active'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '3'
 
-            # with open(path.join(path.dirname(__file__), "../deploy/simulation/nginx-deployment.yaml")) as f:
-            #     dep = yaml.safe_load(f)
-            #     resp = self.appV1.create_namespaced_deployment(
-            #         body=dep, namespace=self.namespace)
-            #     print(f"Deployment created. Status='{resp.metadata.name}'")
-
-            dir_yaml = "../deploy/simulation/create-testpod.yaml"
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             # utils.create_from_yaml(apiclient, dir_yaml, namespace=self.namespace, verbose=True)
             print('pod',cnt,' created')
@@ -73,10 +65,21 @@ class Simulator:
 
         cnt = 0
         # idle pod
-        while cnt < 5:
+        while cnt < 15:
             self.pod_manifest['metadata']['name'] = 'experiment-idle-' + str(cnt)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'idle'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
+
+            self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
+            print('pod', cnt, ' created')
+            cnt += 1
+
+        cnt = 0
+        # mixed pod
+        while cnt < 15:
+            self.pod_manifest['metadata']['name'] = 'experiment-mixed-' + str(cnt)
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'mixed'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '3'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             print('pod', cnt, ' created')
