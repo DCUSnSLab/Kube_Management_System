@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from kubernetes import client, config, stream
 
-class CheckHistory():
+class HistoryManager():
     def __init__(self, api_instance, pod):
         self.file = "/home/dcuuser/.bash_history"
         self.v1 = api_instance
