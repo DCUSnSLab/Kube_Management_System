@@ -1,7 +1,7 @@
 from process import Process, Mode_State, Policy_State
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
-from checkHistory import CheckHistory
-from checkProcess import CheckProcess
+from historyManager import HistoryManager
+from processManager import ProcessManager
 # from processDB import save_to_database, get_last_bash_history, save_bash_history
 from DB_postgresql import (
     save_bash_history_result,
@@ -101,7 +101,7 @@ class Pod():
 
     def getResultHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
-        ch = CheckHistory(self.api, self.pod)
+        ch = HistoryManager(self.api, self.pod)
         lastTime_Bash_history=ch.getLastUseTime()
         self.check_history_result = ch.run(lastTime_Bash_history)
         print(self.check_history_result)
@@ -154,7 +154,7 @@ class Pod():
         """get /proc/stat data amd split into 52"""
         self.resetProcessList()
 
-        cp = CheckProcess(self.api, self.pod)
+        cp = ProcessManager(self.api, self.pod)
         process_data = cp.getProcStat()
         # 명령어의 결과값이 None일 경우 건너뛰도록
         if process_data is None:

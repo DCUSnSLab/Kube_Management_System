@@ -1,7 +1,7 @@
 from kubernetes import client, config, stream
-import re
+import time
 
-class CheckProcess:
+class ProcessManager:
     def __init__(self, api_instance, pod):
         self.v1 = api_instance
         self.pod = pod
@@ -13,6 +13,25 @@ class CheckProcess:
 
     def getProcStat(self):
         command = ["sh", "-c", "ls -d /proc/[0-9]* | xargs -I {} sh -c 'cat {}/stat 2>/dev/null'"]
+        try:
+            exec_command = stream.stream(
+                self.v1.connect_get_namespaced_pod_exec,
+                self.pod.metadata.name,
+                self.namespace,
+                command=command,
+                stderr=True, stdin=False,
+                stdout=True, tty=False
+            )
+            return self._filter_sh_xargs(exec_command)
+        except Exception as e:
+            if "Connection to remote host was lost" in str(e):
+                print(f"Connection to Pod '{self.pod.metadata.name}' was lost. Skipping this Pod.")
+            else:
+                print(f"An unexpected error occurred: {e}")
+            return None
+
+    def getProcStat_v2(self):
+        command = ["sh", "-c", "cat /proc/[0-9]*/stat 2>/dev/null"]
         try:
             exec_command = stream.stream(
                 self.v1.connect_get_namespaced_pod_exec,
@@ -82,3 +101,22 @@ class CheckProcess:
                     filtered_processes.append(line)
 
         return "\n".join(filtered_processes)
+
+if __name__ == "__main__":
+    startTime = time.time()
+
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    pods: dict = v1.list_namespaced_pod('swlabpods').items
+    cnt = 0
+    for pod in pods:
+        if cnt == 30:
+            break
+        p = ProcessManager(v1, pod)
+        print(cnt, pod.metadata.name)
+        print(p.getProcStat_v2(),'\n')
+        cnt += 1
+
+    endTime = time.time()
+    runtime = endTime - startTime
+    print(f"전체 수행 시간: {runtime:.2f}초")
