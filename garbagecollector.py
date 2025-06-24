@@ -18,6 +18,7 @@ class GarbageCollector():
         self.podlist = {}
         self.intervalTime = 60
         self.count = 1
+        self.running = False
 
     # def manage(self):
     #     if self.devMode is True:
@@ -35,7 +36,9 @@ class GarbageCollector():
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
 
-        while True:
+        self.running = True
+
+        while self.running:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} Update Pod List...")
             self.listPods()
@@ -103,28 +106,13 @@ class GarbageCollector():
         # 새로운 목록으로 변경
         self.podlist = new_podlist
 
-    def execTest(self, pod):
-        #exec test
-        command = ["ls", "-al", ".bash_history"]
-        exec_commmand = stream.stream(self.v1.connect_get_namespaced_pod_exec,
-                                      name=pod.name,
-                                      namespace=self.namespace,
-                                      command=command,
-                                      stdout=True, stdin=False, stderr=True, tty=False)
-        print(exec_commmand)
-
-    def checkStatus(self, pod):
-        pass
-        #true = 사용, false = idle
-        # if not result:
-        #     print(f"Not used for more than 7 days.\nDelete pod {pod.metadata.name} now.\n" + "-" * 50)
-        #     self.deletePod(pod)
-        # else:
-        #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
-
     def deletePod(self, p_name):
         print(p_name, "______REMOVE____")
         self.v1.delete_namespaced_pod(p_name, self.namespace)
+
+    def stop(self):
+        """스레드 종료를 위해 추가함"""
+        self.running = False
 
 if __name__ == "__main__":
     # initialize_database()  # DB 초기화 (sqlite)

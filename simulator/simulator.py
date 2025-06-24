@@ -1,19 +1,23 @@
 from kubernetes import client, config, utils
 import time
+from garbagecollector import GarbageCollector
+import threading
 
 class Simulator:
     def __init__(self, namespace: str = 'gc-simulator'):
         config.load_kube_config()
         self.coreV1 = client.CoreV1Api()
         self.appV1 = client.AppsV1Api()
-        self.namespace = namespace
-        self.pod_list = {}
+        self.namespace: str = namespace
+        self.pod_list: dict = {}
         self.intervalTime = 120  # pod 생성 반복 주기
         self.times = 5  # 반복할 횟수
         self.count = 0  # 반복한 횟수
-        self.active = 0
-        self.idle = 0
-        self.mixed = 0
+        self.active = 0  # active pods
+        self.idle = 0  # idle pods
+        self.mixed = 0  # mixed pods
+        self.gc = GarbageCollector(namespace='gc-simulator', isDev=False)
+        self.gc_thread = threading.Thread(target=self.gc.manage)  # 시뮬레이터와 동시 수행을 위해 스레드 사용
 
         self.pod_manifest = {
             "apiVersion": "v1",
@@ -56,6 +60,11 @@ class Simulator:
             while cnt < 5:  # 120초마다 pod 생성
                 print(f"\n---create pod {cnt+1} times---")
                 self.createPod(10, 6, 6)  # active 50, idle 30, mixed 30
+
+                if cnt == 0:
+                    time.sleep(1)
+                    self.gc_thread.start()
+
                 time.sleep(self.intervalTime)
                 cnt += 1
 
@@ -67,6 +76,8 @@ class Simulator:
                 print("Deleting pod ------")
                 time.sleep(1)
             self.count += 1
+            self.gc.stop()
+            self.gc_thread.join()
 
     def createPod(self, ac, i, mx):
         """
