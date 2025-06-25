@@ -49,6 +49,8 @@ class Simulator:
         """
         Run simulation
         """
+        self.gc_thread.start()
+
         while self.count < self.times:
             # 실험 시작 전 초기화
             cnt = 0
@@ -57,14 +59,10 @@ class Simulator:
             self.mixed = 0
 
             print(f"\n\n======Start {self.count+1}======\n")
+
             while cnt < 5:  # 120초마다 pod 생성
                 print(f"\n---create pod {cnt+1} times---")
                 self.createPod(10, 6, 6)  # active 50, idle 30, mixed 30
-
-                if cnt == 0:
-                    time.sleep(1)
-                    self.gc_thread.start()
-
                 time.sleep(self.intervalTime)
                 cnt += 1
 
@@ -76,8 +74,9 @@ class Simulator:
                 print("Deleting pod ------")
                 time.sleep(1)
             self.count += 1
-            self.gc.stop()
-            self.gc_thread.join()
+        # simulator end and gc stop
+        self.gc.stop()
+        self.gc_thread.join()
 
     def createPod(self, ac, i, mx):
         """
