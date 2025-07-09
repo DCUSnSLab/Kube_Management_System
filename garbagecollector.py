@@ -1,24 +1,24 @@
 from kubernetes import client, config
-from kubernetes.stream import stream
 from pod import Pod
 # from processDB import initialize_database
 from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
 
 from datetime import datetime
 import time
+from multiprocessing import Event
 
 class GarbageCollector():
-    def __init__(self, namespace='default', container=None, isDev=False):
+    def __init__(self, namespace='default', container=None, isDev=False, stop_event=None):
         config.load_kube_config()  # 필수 config값 불러옴
         self.v1 = client.CoreV1Api()  # api
-        self.namespace = namespace
+        self.namespace: str = namespace
         self.container = container
-        self.devMode = isDev
-        self.exclude = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
-        self.podlist = {}
+        self.devMode: bool = isDev
+        self.exclude: list = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
+        self.podlist: dict = {}
         self.intervalTime = 60
         self.count = 1
-        self.running = False
+        self._stop_event = stop_event or Event()
 
     # def manage(self):
     #     if self.devMode is True:
@@ -36,9 +36,7 @@ class GarbageCollector():
         if self.devMode is True:
             self.namespace = 'swlabpods-gc'
 
-        self.running = True
-
-        while self.running:
+        while True:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} Update Pod List...")
             self.listPods()
@@ -62,7 +60,11 @@ class GarbageCollector():
 
             print("Clear!!\n\n")
             self.count+=1
+            if self._stop_event.is_set():
+                break
             time.sleep(self.intervalTime)
+
+        print("Garbage Collector Stopped")
 
     def listPods(self):
         #현재 네임스테이스의 Pod 목록을 가져옴
@@ -109,10 +111,6 @@ class GarbageCollector():
     def deletePod(self, p_name):
         print(p_name, "______REMOVE____")
         self.v1.delete_namespaced_pod(p_name, self.namespace)
-
-    def stop(self):
-        """스레드 종료를 위해 추가함"""
-        self.running = False
 
 if __name__ == "__main__":
     # initialize_database()  # DB 초기화 (sqlite)
