@@ -15,7 +15,7 @@ class Simulator:
         self.namespace: str = namespace
         self.pod_list: dict = {}
         self.intervalTime = 120  # pod 생성 반복 주기
-        self.times = 1  # 반복할 횟수
+        self.times = 5  # 반복할 횟수
         self.count = 0  # 반복한 횟수
         self.active = 0  # active pods
         self.idle = 0  # idle pods
@@ -64,7 +64,7 @@ class Simulator:
 
                 print(f"\n\n======Start {self.count+1}======\n")
 
-                while cnt < 1:  # 120초마다 pod 생성
+                while cnt < 5:  # 120초마다 pod 생성, 총 10분동안 진행 (5회)
                     print(f"\n---create pod {cnt+1} times---")
                     self.createPod(10, 6, 6)  # active 50, idle 30, mixed 30
                     time.sleep(self.intervalTime)
@@ -81,13 +81,12 @@ class Simulator:
 
         except KeyboardInterrupt:
             print("Keyboard Interrupted. Cleanning up...")
+            self.deletePod()
         finally:
             # simulator end(or except) and gc stop
             if self.gc_process.is_alive():
                 self.stop_event.set()
                 self.gc_process.join()
-
-            self.deletePod()
 
     def createPod(self, ac, i, mx):
         """
