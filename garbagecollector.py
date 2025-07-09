@@ -39,7 +39,7 @@ class GarbageCollector():
         while True:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} Update Pod List...")
-            self.listPods()
+            self.getPodList()
             print('='*10+f"Start to Check Process Data {self.count} times"+'='*10)
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
@@ -66,11 +66,12 @@ class GarbageCollector():
 
         print("Garbage Collector Stopped")
 
-    def listPods(self):
+    def getPodList(self):
         #현재 네임스테이스의 Pod 목록을 가져옴
         pods = self.v1.list_namespaced_pod(self.namespace).items
         if not pods:
             print(f"No resources found in {self.namespace} namespace.")
+            self.recordDeletedPod(self.podlist)
             self.podlist = {}
             return
 
@@ -97,16 +98,22 @@ class GarbageCollector():
                     pod_obj.init_pod_data()
 
         removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
-
-        for rm_p in removed_pod:
-            pod_obj = self.podlist[rm_p]
-            if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
-                pod_obj.insert_DeleteReason('UNKNOWN')  # 삭제 사유 기록
-                pod_obj.save_DeleteReason_to_DB()
-            print(f"Pod removed: {rm_p}")
+        self.recordDeletedPod(removed_pod)
 
         # 새로운 목록으로 변경
         self.podlist = new_podlist
+
+    def recordDeletedPod(self, removed_pods):
+        """
+        Record deleted pods
+        Reason is 'UNKOWN' when pod is deleted
+        """
+        for rm_p in removed_pods:
+            pod_obj = self.podlist[rm_p]
+            if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
+                pod_obj.insert_DeleteReason('UNKNOWN')
+                pod_obj.save_DeleteReason_to_DB()
+            print(f"Pod removed: {rm_p}")
 
     def deletePod(self, p_name):
         print(p_name, "______REMOVE____")
