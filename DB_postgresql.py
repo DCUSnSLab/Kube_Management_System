@@ -1,11 +1,14 @@
 import psycopg2
 import logging
 import configparser
+import os
 
 logging.basicConfig(filename="error.log", level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
 config = configparser.ConfigParser()
-config.read("config.ini")  # DB config file
+path = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(path, "config.ini")
+config.read(config_path)  # DB config file
 
 # PostgreSQL setting
 DATABASE_CONFIG = {

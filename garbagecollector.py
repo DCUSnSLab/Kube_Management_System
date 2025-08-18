@@ -1,23 +1,24 @@
 from kubernetes import client, config
-from kubernetes.stream import stream
 from pod import Pod
 # from processDB import initialize_database
 from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
 
 from datetime import datetime
 import time
+from multiprocessing import Event
 
 class GarbageCollector():
-    def __init__(self, namespace='default', container=None, isDev=False):
+    def __init__(self, namespace='default', container=None, isDev=False, stop_event=None):
         config.load_kube_config()  # 필수 config값 불러옴
         self.v1 = client.CoreV1Api()  # api
-        self.namespace = namespace
+        self.namespace: str = namespace
         self.container = container
-        self.devMode = isDev
-        self.exclude = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
-        self.podlist = {}
+        self.devMode: bool = isDev
+        self.exclude: list = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
+        self.podlist: dict = {}
         self.intervalTime = 60
         self.count = 1
+        self._stop_event = stop_event or Event()
 
     # def manage(self):
     #     if self.devMode is True:
@@ -38,7 +39,7 @@ class GarbageCollector():
         while True:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"{timestamp} Update Pod List...")
-            self.listPods()
+            self.getPodList()
             print('='*10+f"Start to Check Process Data {self.count} times"+'='*10)
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
@@ -59,13 +60,18 @@ class GarbageCollector():
 
             print("Clear!!\n\n")
             self.count+=1
+            if self._stop_event.is_set():
+                break
             time.sleep(self.intervalTime)
 
-    def listPods(self):
+        print("Garbage Collector Stopped")
+
+    def getPodList(self):
         #현재 네임스테이스의 Pod 목록을 가져옴
         pods = self.v1.list_namespaced_pod(self.namespace).items
         if not pods:
             print(f"No resources found in {self.namespace} namespace.")
+            self.recordDeletedPod(self.podlist)
             self.podlist = {}
             return
 
@@ -92,35 +98,22 @@ class GarbageCollector():
                     pod_obj.init_pod_data()
 
         removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
-
-        for rm_p in removed_pod:
-            pod_obj = self.podlist[rm_p]
-            if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
-                pod_obj.insert_DeleteReason('UNKNOWN')  # 삭제 사유 기록
-                pod_obj.save_DeleteReason_to_DB()
-            print(f"Pod removed: {rm_p}")
+        self.recordDeletedPod(removed_pod)
 
         # 새로운 목록으로 변경
         self.podlist = new_podlist
 
-    def execTest(self, pod):
-        #exec test
-        command = ["ls", "-al", ".bash_history"]
-        exec_commmand = stream.stream(self.v1.connect_get_namespaced_pod_exec,
-                                      name=pod.name,
-                                      namespace=self.namespace,
-                                      command=command,
-                                      stdout=True, stdin=False, stderr=True, tty=False)
-        print(exec_commmand)
-
-    def checkStatus(self, pod):
-        pass
-        #true = 사용, false = idle
-        # if not result:
-        #     print(f"Not used for more than 7 days.\nDelete pod {pod.metadata.name} now.\n" + "-" * 50)
-        #     self.deletePod(pod)
-        # else:
-        #     print(f"Pod {pod.metadata.name} is running.\n" + "-" * 50)
+    def recordDeletedPod(self, removed_pods):
+        """
+        Record deleted pods
+        Reason is 'UNKOWN' when pod is deleted
+        """
+        for rm_p in removed_pods:
+            pod_obj = self.podlist[rm_p]
+            if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
+                pod_obj.insert_DeleteReason('UNKNOWN')
+                pod_obj.save_DeleteReason_to_DB()
+            print(f"Pod removed: {rm_p}")
 
     def deletePod(self, p_name):
         print(p_name, "______REMOVE____")
