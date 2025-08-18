@@ -7,7 +7,7 @@ def run_gc(ns, sc):
     gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
     gc.manage()
 
-class Simulator:
+class Generator:
     def __init__(self, namespace: str = 'gc-simulator'):
         config.load_kube_config()
         self.coreV1 = client.CoreV1Api()
@@ -160,12 +160,12 @@ class Simulator:
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
-    simulator = Simulator()
-    simulator.run()
-    # simulator.deletePod()
+    generator = Generator()
+    generator.run()
+    # generator.deletePod()
     # while True:
-    #     if simulator.checkStatus():
+    #     if generator.checkStatus():
     #         break
     #     print("Deleting pod ------")
     #     time.sleep(1)
-    # simulator.createPod()
+    # generator.createPod()
