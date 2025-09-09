@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 환경 변수 설정
-PROCESS_STATE=${PROCESS_STATE:-active}  # active / inactive / running / background_active
+PROCESS_STATE=${PROCESS_STATE:-active}  # active / idle / running / background_active
 NUM_PROCS=${NUM_PROCS:-1}               # 실행할 프로세스 개수
 PROCESS_MIX=${PROCESS_MIX:-single}      # single / diverse (프로세스 조합 방식)
 
@@ -26,7 +26,7 @@ case "$PROCESS_STATE" in
     active)
         DIR="./programs/active"
         ;;
-    inactive)
+    idle)
         DIR="./programs/inactive"
         ;;
     running)

@@ -59,7 +59,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - PROCESS_STATE=inactive
+      - PROCESS_STATE=idle
       - NUM_PROCS=5
       - PROCESS_MIX=single
     mem_limit: 200m
