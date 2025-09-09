@@ -18,7 +18,7 @@ services:
   background-active:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     environment:
       - PROCESS_STATE=background_active
       - NUM_PROCS=3
@@ -31,7 +31,7 @@ services:
   active:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     environment:
       - PROCESS_STATE=active
       - NUM_PROCS=2
@@ -44,7 +44,7 @@ services:
   running:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     environment:
       - PROCESS_STATE=running
       - NUM_PROCS=3
@@ -57,7 +57,7 @@ services:
   inactive:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     environment:
       - PROCESS_STATE=inactive
       - NUM_PROCS=5
@@ -70,7 +70,7 @@ services:
   diverse:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     environment:
       - PROCESS_STATE=running
       - NUM_PROCS=10
