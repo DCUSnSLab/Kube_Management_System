@@ -23,8 +23,8 @@ services:
       - PROCESS_STATE=background_active
       - NUM_PROCS=3
       - PROCESS_MIX=single
-    mem_limit: 256m
-    cpus: 0.3
+    mem_limit: 200m
+    cpus: 0.1
     restart: unless-stopped
     
   # Active 컨테이너
@@ -36,8 +36,8 @@ services:
       - PROCESS_STATE=active
       - NUM_PROCS=2
       - PROCESS_MIX=single
-    mem_limit: 256m
-    cpus: 0.4
+    mem_limit: 200m
+    cpus: 0.1
     restart: unless-stopped
     
   # Running 컨테이너
@@ -49,8 +49,8 @@ services:
       - PROCESS_STATE=running
       - NUM_PROCS=3
       - PROCESS_MIX=single
-    mem_limit: 128m
-    cpus: 0.2
+    mem_limit: 200m
+    cpus: 0.1
     restart: unless-stopped
     
   # Inactive 컨테이너
@@ -62,7 +62,7 @@ services:
       - PROCESS_STATE=inactive
       - NUM_PROCS=5
       - PROCESS_MIX=single
-    mem_limit: 64m
+    mem_limit: 200m
     cpus: 0.1
     restart: unless-stopped
     
@@ -75,8 +75,8 @@ services:
       - PROCESS_STATE=running
       - NUM_PROCS=10
       - PROCESS_MIX=diverse
-    mem_limit: 512m
-    cpus: 0.5
+    mem_limit: 200m
+    cpus: 0.1
     restart: unless-stopped
 
 networks:
