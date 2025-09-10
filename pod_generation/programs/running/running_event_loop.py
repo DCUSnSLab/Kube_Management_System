@@ -1,13 +1,14 @@
-#!/usr/bin/env python3
-"""
-Running Process - Event Loop
-이벤트 루프 기반 실행 프로세스
-"""
 import time
 import sys
 import signal
 import random
 from collections import deque
+import os
+
+"""
+Running Process - Event Loop
+이벤트 루프 기반 실행 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nEvent loop process terminated")
@@ -107,5 +108,4 @@ def main():
         time.sleep(0.05)
 
 if __name__ == "__main__":
-    import os
     main()

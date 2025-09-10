@@ -1,14 +1,15 @@
-#!/usr/bin/env python3
-"""
-Running Process - Task Queue
-작업 큐를 처리하는 실행 중 프로세스
-"""
 import time
 import sys
 import signal
 import queue
 import random
 import threading
+import os
+
+"""
+Running Process - Task Queue
+작업 큐를 처리하는 실행 중 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nTask queue process terminated")
@@ -81,5 +82,4 @@ def main():
             print(f"[RUNNING] Queue empty, waiting for tasks...", flush=True)
 
 if __name__ == "__main__":
-    import os
     main()

@@ -1,14 +1,15 @@
-#!/usr/bin/env python3
-"""
-Background Active Process - Network Service
-백그라운드에서 네트워크 서비스를 시뮬레이션
-"""
 import time
 import sys
 import signal
 import socket
 import threading
 import random
+
+
+"""
+Background Active Process - Network Service
+백그라운드에서 네트워크 서비스를 시뮬레이션
+"""
 
 def signal_handler(sig, frame):
     sys.exit(0)

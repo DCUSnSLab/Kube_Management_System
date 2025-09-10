@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
-"""
-Background Active Process - Memory Cache
-백그라운드에서 메모리 캐시를 관리하는 프로세스
-"""
 import time
 import sys
 import signal
 import random
 from collections import OrderedDict
+
+"""
+Background Active Process - Memory Cache
+백그라운드에서 메모리 캐시를 관리하는 프로세스
+"""
 
 def signal_handler(sig, frame):
     sys.exit(0)
