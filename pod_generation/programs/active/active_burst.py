@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
-"""
-Active Process - Burst Mode
-버스트 모드로 활동하는 프로세스
-"""
 import time
 import sys
 import signal
 import random
 import math
+
+"""
+Active Process - Burst Mode
+버스트 모드로 활동하는 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nBurst mode process terminated")

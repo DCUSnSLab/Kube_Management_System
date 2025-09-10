@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
+import os
+import sys
+import time
+import signal
+import gc
+
 """
 Active Process - Memory Intensive
 """
-import os, sys, time, signal, gc
 
 def signal_handler(sig, frame):
     print("\nMemory intensive process terminated")

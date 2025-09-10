@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
-"""
-Active Process - Multi-threaded
-멀티스레드로 활발히 작동하는 프로세스
-"""
 import time
 import sys
 import signal
 import threading
 import random
 import queue
+
+"""
+Active Process - Multi-threaded
+멀티스레드로 활발히 작동하는 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nMulti-threaded process terminated")

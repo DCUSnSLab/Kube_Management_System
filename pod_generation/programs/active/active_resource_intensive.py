@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
-"""
-Active Process - Resource Intensive
-리소스를 집중적으로 사용하는 활성 프로세스
-"""
 import time
 import sys
 import signal
 import multiprocessing
 import ctypes
 import array
+
+"""
+Active Process - Resource Intensive
+리소스를 집중적으로 사용하는 활성 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nResource intensive process terminated")
