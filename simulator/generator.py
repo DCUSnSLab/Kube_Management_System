@@ -35,6 +35,16 @@ class Generator:
                     {
                         "name": "experiment-container",
                         "image": "harbor.cu.ac.kr/swlabpods/gcpod:latest",
+                        "resources": {
+                            "requests": {
+                                "cpu": "50m",
+                                "memory": "150Mi"
+                            },
+                            "limits": {
+                                "cpu": "100m",
+                                "memory": "200Mi"
+                            }
+                        },
                         "env": [
                             {
                                 "name": "PROCESS_STATE",
@@ -58,7 +68,7 @@ class Generator:
         """
         Run simulation
         """
-        self.gc_process.start()
+        # self.gc_process.start()
         try:
             while self.count < self.times:
                 # 실험 시작 전 카운트 횟수 및 파드 수 초기화
@@ -73,7 +83,7 @@ class Generator:
 
                 while cnt < 5:  # 120초마다 pod 생성, 총 10분동안 진행 (5회)
                     print(f"\n---create pod {cnt+1} times---")
-                    self.createPod(2, 2, 2, 2)  # active, idle, running, bg
+                    self.createPod(1, 1, 1, 1)  # active, idle, running, background active
                     time.sleep(self.intervalTime)
                     cnt += 1
 
@@ -135,7 +145,7 @@ class Generator:
         # background active pod
         bg += self.bg_active
         while self.bg_active < bg:
-            self.pod_manifest['metadata']['name'] = 'experiment-running-' + str(self.bg_active)
+            self.pod_manifest['metadata']['name'] = 'experiment-background-ac-' + str(self.bg_active)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'background_active'
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
 
