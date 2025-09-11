@@ -27,7 +27,7 @@ case "$PROCESS_STATE" in
         DIR="./programs/active"
         ;;
     idle)
-        DIR="./programs/inactive"
+        DIR="./programs/idle"
         ;;
     running)
         DIR="./programs/running"
@@ -37,7 +37,7 @@ case "$PROCESS_STATE" in
         ;;
     *)
         echo "Error: Unknown PROCESS_STATE: $PROCESS_STATE"
-        echo "Valid options: active, inactive, running, background_active, foreground_active"
+        echo "Valid options: active, idle, running, background_active, foreground_active"
         exit 1
         ;;
 esac
@@ -63,7 +63,7 @@ if [ "$PROCESS_MIX" == "diverse" ]; then
     # 모든 상태 디렉토리
     ALL_DIRS=(
         "./programs/active"
-        "./programs/inactive"
+        "./programs/idle"
         "./programs/running"
         "./programs/background_active"
     )

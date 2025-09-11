@@ -1,11 +1,12 @@
-#!/usr/bin/env python3
+import time
+import sys
+import signal
+import os
+
 """
 Inactive Process - Sleeping
 대부분의 시간을 sleep 상태로 보내는 비활성 프로세스
 """
-import time
-import sys
-import signal
 
 def signal_handler(sig, frame):
     print("\nSleeping process terminated")
@@ -30,5 +31,4 @@ def main():
         time.sleep(30)  # 30초 sleep
 
 if __name__ == "__main__":
-    import os
     main()

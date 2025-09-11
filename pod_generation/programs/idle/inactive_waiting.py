@@ -1,13 +1,14 @@
-#!/usr/bin/env python3
-"""
-Inactive Process - Waiting
-대기 상태를 유지하는 비활성 프로세스
-"""
 import time
 import sys
 import signal
 import select
 import socket
+import os
+
+"""
+Inactive Process - Waiting
+대기 상태를 유지하는 비활성 프로세스
+"""
 
 def signal_handler(sig, frame):
     print("\nWaiting process terminated")
@@ -42,5 +43,4 @@ def main():
         time.sleep(10)
 
 if __name__ == "__main__":
-    import os
     main()
