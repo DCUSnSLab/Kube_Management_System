@@ -9,7 +9,7 @@ class HistoryManager():
         self.pod = pod
         self.namespace = pod.metadata.namespace
 
-    def run(self, filetime):
+    def analyze(self, filetime):
         # 사용하지않는다고 판단하면 false
         # filetime = self.getLastUseTime()
         if filetime == None:

@@ -1,14 +1,43 @@
+from enum import Enum
+from typing import Dict
+
 from kubernetes import client, config, stream
 import time
+
+class ProcessStateClassification(Enum):
+    """프로세스 상태 분류"""
+    ACTIVE = "active"          # 활성 프로세스
+    IDLE = "idle"              # 유휴 프로세스
+    INACTIVE = "inactive"      # 비활성 프로세스
+    GC = "gc"                  # GC 대상
 
 class ProcessManager:
     def __init__(self, api_instance, pod):
         self.v1 = api_instance
         self.pod = pod
-        self.namespace = pod.metadata.namespace
+        self.namespace: str = pod.metadata.namespace
         self.used_commands: list = ["xargs", "sh", "cat", "bash"]
 
-    def run(self):
+        self.cpu_ticks_per_sec = 100
+        self.previous_cpu_stats: dict = {}  # pod별 이전 CPU 통계 저장하는 딕셔너리
+        self.sampling_interval = 60
+
+        # State 기반 분류
+        self.active_stats: dict = {'R':'Running', 'D':'Uninterruptible Sleep'}
+        self.idle_stats: dict = {'S':'Sleeping', 'T':'Stopped'}
+        self.gc_stats: dict = {'Z':'Zombie'}
+
+        # CPU 활동률기반 분류 기준
+        self.active_cpu_threshold = 0.01  # 1% 이상
+        self.idle_cpu_threshold = 0.001  # 0.1% 이상
+
+    def analyze(self) -> Dict:
+        """
+        return:
+        분석결과
+          - gc여부: bool
+          - gc이유: str
+        """
         pass
 
     def getProcStat(self):
