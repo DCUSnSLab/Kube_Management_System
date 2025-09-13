@@ -6,6 +6,7 @@ class Mode_State(Enum):
     D = 'Uninterruptible Sleep'
     Z = 'Zombie'
     T = 'Stopped'
+    X = 'Dead'
 
 class Policy_State(Enum):
     SCHED_NORMAL = 0
