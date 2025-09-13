@@ -6,7 +6,7 @@ class ProcessManager:
         self.v1 = api_instance
         self.pod = pod
         self.namespace = pod.metadata.namespace
-        self.used_commands = ["xargs", "sh"]
+        self.used_commands: list = ["xargs", "sh", "cat", "bash"]
 
     def run(self):
         pass
@@ -22,7 +22,7 @@ class ProcessManager:
                 stderr=True, stdin=False,
                 stdout=True, tty=False
             )
-            return self._filter_sh_xargs(exec_command)
+            return self._filter_command_processes(exec_command)
         except Exception as e:
             if "Connection to remote host was lost" in str(e):
                 print(f"Connection to Pod '{self.pod.metadata.name}' was lost. Skipping this Pod.")
@@ -31,7 +31,17 @@ class ProcessManager:
             return None
 
     def getProcStat_v2(self):
-        command = ["sh", "-c", "cat /proc/[0-9]*/stat 2>/dev/null"]
+        # 자기 자신을 제외하는 쉘 스크립트 사용
+        command = [
+            "sh", "-c",
+            "SELF_PID=$$ && "
+            "for stat in /proc/[0-9]*/stat; do "
+            "  if [ -r \"$stat\" ]; then "
+            "    PID=$(basename $(dirname \"$stat\")) && "
+            "    [ \"$PID\" != \"$SELF_PID\" ] && cat \"$stat\" 2>/dev/null; "
+            "  fi; "
+            "done"
+        ]
         try:
             exec_command = stream.stream(
                 self.v1.connect_get_namespaced_pod_exec,
@@ -41,7 +51,7 @@ class ProcessManager:
                 stderr=True, stdin=False,
                 stdout=True, tty=False
             )
-            return self._filter_sh_xargs(exec_command)
+            return exec_command
         except Exception as e:
             if "Connection to remote host was lost" in str(e):
                 print(f"Connection to Pod '{self.pod.metadata.name}' was lost. Skipping this Pod.")
@@ -49,56 +59,50 @@ class ProcessManager:
                 print(f"An unexpected error occurred: {e}")
             return None
 
-    def _filter_sh_xargs(self, exec_command):
+    def _filter_command_processes(self, exec_command):
         """
         Exclude processes where:
-        `sh` process PID == `xargs` process PPID
+        processes created by command execution
         """
-        filtered_processes = []
-        sh_pids = set()
-        xargs_ppids = set()
-
-        # 1. Traverses all processes and collects `sh` and `xargs` information
-        for line in exec_command.splitlines():
-            fields = line.split()
-            if len(fields) > 2:
-                pid = fields[0]
-                comm = fields[1].strip("()")
-                ppid = fields[3]
-
-                if comm == "sh":
-                    sh_pids.add(pid)
-                elif comm == "xargs":
-                    xargs_ppids.add(ppid)
-        # 2. Check the relationship between sh and xargs to determine which PID and PPID pairs to exclude
-        exclude_pairs = sh_pids.intersection(xargs_ppids)
-
-        # 3. Include only processes that do not apply
-        for line in exec_command.splitlines():
-            fields = line.split()
-            if len(fields) > 2:
-                pid = fields[0]  # PID of the process
-                ppid = fields[3]  # Parent PID (PPID)
-
-                if not (pid in exclude_pairs or ppid in exclude_pairs):
-                    filtered_processes.append(line)
-
-        return "\n".join(filtered_processes)
-
-    def _filter_used_commands(self, exec_command):
-        """
-        Specific command filter
-        """
-        filtered_processes = []
         if not exec_command:
-            return filtered_processes
+            return ""
+
+        filtered_processes: list = []
+        processes_info: list = []
 
         for line in exec_command.splitlines():
             fields = line.split()
-            if len(fields) > 1:
-                process_name = fields[1].strip("()")
-                if process_name not in self.used_commands:
-                    filtered_processes.append(line)
+            if len(fields) > 2:
+                try:
+                    pid = int(fields[0])
+                    comm = fields[1].strip("()")
+                    ppid = int(fields[3])
+
+                    processes_info.append({
+                        'line': line,
+                        'pid': pid,
+                        'comm': comm,
+                        'ppid': ppid
+                    })
+                except (ValueError, IndexError):
+                    continue
+
+        # 필터링할 PID 수집 (set: 중복없이 수집)
+        filter_pids = set()
+
+        # used_commands에 있는 프로세스와 그 자식들 필터링
+        for proc in processes_info:
+            if proc['comm'] in self.used_commands:
+                filter_pids.add(proc['pid'])
+                # 이 프로세스의 자식들도 필터링
+                for child in processes_info:
+                    if child['ppid'] == proc['pid']:
+                        filter_pids.add(child['pid'])
+
+        # 필터링되지 않은 프로세스만 반환
+        for proc in processes_info:
+            if proc['pid'] not in filter_pids:
+                filtered_processes.append(proc['line'])
 
         return "\n".join(filtered_processes)
 

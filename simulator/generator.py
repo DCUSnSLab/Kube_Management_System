@@ -19,7 +19,8 @@ class Generator:
         self.count = 0  # 반복한 횟수
         self.active = 0  # active pods
         self.idle = 0  # idle pods
-        self.mixed = 0  # mixed pods
+        self.running = 0  # running pods
+        self.bg_active = 0  # background active pods
         self.stop_event = Event()
         self.gc_process = Process(target=run_gc, args=(self.namespace, self.stop_event))  # 시뮬레이터와 동시 수행을 위해 멀티프로세싱 사용
 
@@ -34,14 +35,28 @@ class Generator:
                     {
                         "name": "experiment-container",
                         "image": "harbor.cu.ac.kr/swlabpods/gcpod:latest",
+                        "resources": {
+                            "requests": {
+                                "cpu": "50m",
+                                "memory": "150Mi"
+                            },
+                            "limits": {
+                                "cpu": "100m",
+                                "memory": "200Mi"
+                            }
+                        },
                         "env": [
                             {
-                                "name": "MODE",
+                                "name": "PROCESS_STATE",
                                 "value": "active"
                             },
                             {
                                 "name": "NUM_PROCS",
                                 "value": "1"
+                            },
+                            {
+                                "name": "PROCESS_MIX",
+                                "value": "single"
                             }
                         ]
                     }
@@ -53,20 +68,22 @@ class Generator:
         """
         Run simulation
         """
-        self.gc_process.start()
+        # self.gc_process.start()
         try:
             while self.count < self.times:
                 # 실험 시작 전 카운트 횟수 및 파드 수 초기화
                 cnt = 0
                 self.active = 0
                 self.idle = 0
-                self.mixed = 0
+                self.running = 0
+                self.bg_active = 0
+
 
                 print(f"\n\n======Start {self.count+1}======\n")
 
                 while cnt < 5:  # 120초마다 pod 생성, 총 10분동안 진행 (5회)
                     print(f"\n---create pod {cnt+1} times---")
-                    self.createPod(10, 6, 6)  # active 50, idle 30, mixed 30
+                    self.createPod(1, 1, 1, 1)  # active, idle, running, background active
                     time.sleep(self.intervalTime)
                     cnt += 1
 
@@ -88,7 +105,7 @@ class Generator:
                 self.stop_event.set()
                 self.gc_process.join()
 
-    def createPod(self, ac, i, mx):
+    def createPod(self, ac, idle, run, bg):
         """
         Create pod
         """
@@ -96,7 +113,7 @@ class Generator:
         ac += self.active  # 현재 파드의 수 + 생성할 파드의 수
         while self.active < ac:
             self.pod_manifest['metadata']['name'] = 'experiment-active-'+str(self.active)
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'active'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'active'
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '3'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
@@ -104,26 +121,37 @@ class Generator:
             self.active += 1
 
         # idle pod
-        i += self.idle
-        while self.idle < i:
+        idle += self.idle
+        while self.idle < idle:
             self.pod_manifest['metadata']['name'] = 'experiment-idle-' + str(self.idle)
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'idle'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'idle'
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             print('idle pod', self.idle, ' created')
             self.idle += 1
 
-        # mixed pod
-        mx += self.mixed
-        while self.mixed < mx:
-            self.pod_manifest['metadata']['name'] = 'experiment-mixed-' + str(self.mixed)
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'MODE')['value'] = 'mixed'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '3'
+        # running pod
+        run += self.running
+        while self.running < run:
+            self.pod_manifest['metadata']['name'] = 'experiment-running-' + str(self.running)
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'running'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
-            print('mixed pod', self.mixed, ' created')
-            self.mixed += 1
+            print('running pod', self.running, ' created')
+            self.running += 1
+
+        # background active pod
+        bg += self.bg_active
+        while self.bg_active < bg:
+            self.pod_manifest['metadata']['name'] = 'experiment-background-ac-' + str(self.bg_active)
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'background_active'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
+
+            self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
+            print('background active pod', self.bg_active, ' created')
+            self.bg_active += 1
 
     def deletePod(self):
         """

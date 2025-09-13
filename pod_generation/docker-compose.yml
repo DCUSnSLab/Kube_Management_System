@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+#  # Foreground Active 컨테이너
+#  foreground-active:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile_v2
+#    environment:
+#      - PROCESS_STATE=foreground_active
+#      - NUM_PROCS=2
+#      - PROCESS_MIX=single
+#    mem_limit: 512m
+#    cpus: 0.5
+#    restart: unless-stopped
+    
+  # Background Active 컨테이너
+  background-active:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PROCESS_STATE=background_active
+      - NUM_PROCS=3
+      - PROCESS_MIX=single
+    mem_limit: 200m
+    cpus: 0.1
+    restart: unless-stopped
+    
+  # Active 컨테이너
+  active:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PROCESS_STATE=active
+      - NUM_PROCS=2
+      - PROCESS_MIX=single
+    mem_limit: 200m
+    cpus: 0.1
+    restart: unless-stopped
+    
+  # Running 컨테이너
+  running:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PROCESS_STATE=running
+      - NUM_PROCS=3
+      - PROCESS_MIX=single
+    mem_limit: 200m
+    cpus: 0.1
+    restart: unless-stopped
+    
+  # Inactive 컨테이너
+  inactive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PROCESS_STATE=idle
+      - NUM_PROCS=5
+      - PROCESS_MIX=single
+    mem_limit: 200m
+    cpus: 0.1
+    restart: unless-stopped
+    
+  # Diverse Mix 컨테이너
+  diverse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PROCESS_STATE=running
+      - NUM_PROCS=10
+      - PROCESS_MIX=diverse
+    mem_limit: 200m
+    cpus: 0.1
+    restart: unless-stopped
+
+networks:
+  default:
+    name: process-simulator-network
+    driver: bridge
