@@ -8,8 +8,21 @@ class ProcessStateClassification(Enum):
     """프로세스 상태 분류"""
     ACTIVE = "active"          # 활성 프로세스
     IDLE = "idle"              # 유휴 프로세스
-    INACTIVE = "inactive"      # 비활성 프로세스
-    GC = "gc"                  # GC 대상
+    GC = "gc"                  # GC 대상 (비활성 상태)
+
+class ProcessStatePolicy:
+    """프로세스 상태 분류 기준"""
+    # State 기반 분류 기준
+    ACTIVE_STATES: dict = {'Running', 'Uninterruptible Sleep'}
+    IDLE_STATES: dict = {'Sleeping', 'Stopped'}
+    INACTIVE_STATES: dict = {'Zombie', 'Dead'}
+    # CPU 활동률기반 분류 기준
+    ACTIVE_CPU_THRESHOLD = 0.01     # 1% 초과
+    IDLE_CPU_THRESHOLD = 0          # 0 초과
+    # 경과 시간(나이) 기준 (초 단위)
+    ACTIVE_NEW_AGE_THRESHOLD = 5 * 60           # 5분 미만(신규 프로세스)
+    ACTIVE_AGE_THRESHOLD = 1 * 60 * 60          # 1시간 미만 (활동률 0일 경우 idle)
+    IDLE_AGE_THRESHOLD = 24 * 60 * 60           # 24시간 미만 (활동률 0일 경우 inactive)
 
 class ProcessManager:
     def __init__(self, api_instance, pod):
@@ -21,19 +34,6 @@ class ProcessManager:
         self.cpu_ticks_per_sec = 100
         self.previous_cpu_states: dict = {}  # pod별 이전 CPU 통계 저장하는 딕셔너리
         self.sampling_interval = 60
-
-        # State 기반 분류
-        self.active_states: dict = {'R':'Running', 'D':'Uninterruptible Sleep'}
-        self.idle_states: dict = {'S':'Sleeping', 'T':'Stopped'}
-        self.gc_states: dict = {'Z':'Zombie', 'X':'Dead'}
-
-        # CPU 활동률기반 분류 기준
-        self.active_cpu_threshold = 0.01  # 1% 이상
-        self.idle_cpu_threshold = 0.001  # 0.1% 이상
-
-        # 시간(나이) 기준 (초 단위)
-        self.active_age_threshold = 1 * 60 * 60
-        self.idle_age_threshold = 24 * 60 * 60
 
     def getProcStat(self):  # legacy (No use)
         command = ["sh", "-c", "ls -d /proc/[0-9]* | xargs -I {} sh -c 'cat {}/stat 2>/dev/null'"]
@@ -164,14 +164,25 @@ class ProcessManager:
             'total': len(processes),
             'active': 0,            # 활성
             'idle': 0,              # 유휴
-            'inactive': 0,          # 비활성
+            'gc_candidates': 0,     # 비활성 = gc 대상
             'zombie': 0,            # 좀비
-            'gc_candidates': 0      # gc 대상
         }
         for process in processes:
             classification = self._classify_process(process, pod_name, current_time, boot_time)
             process_classification.append(classification)
 
+            # 분류 결과 요약
+            if classification['state'] == ProcessStateClassification.ACTIVE:
+                process_summary['active'] += 1
+            elif classification['state'] == ProcessStateClassification.IDLE:
+                process_summary['idle'] += 1
+            elif classification['state'] == ProcessStateClassification.GC:
+                process_summary['gc_candidates'] += 1
+                if classification['reason'] == 'Zombie':
+                    process_summary['zombie'] += 1
+
+        # 현재 CPU 통계 저장
+        self._update_cpu_states(pod_name, processes, current_time)
 
     def _classify_process(self, p, pod_name: str, current_time, btime) -> Dict:
         """
@@ -181,19 +192,19 @@ class ProcessManager:
         """
         # 1. 프로세스 상태 기반 판단
         # Zombie/Dead 프로세스
-        if p.state in self.gc_states:
+        if p.state in ProcessStatePolicy.INACTIVE_STATES:
             return {
                 'pid': p.pid,
-                'comm' : p.comm,
+                'comm': p.comm,
                 'state': ProcessStateClassification.GC,
                 'reason': 'Zombie',
                 'cpu_activity': 0
             }
         # Running/Uninterruptible 프로세스는 활성
-        if p.state in self.active_states:
+        if p.state in ProcessStatePolicy.ACTIVE_STATES:
             return {
                 'pid': p.pid,
-                'comm' : p.comm,
+                'comm': p.comm,
                 'state': ProcessStateClassification.ACTIVE,
                 'reason': 'Active_state',
                 'cpu_activity': None
@@ -201,43 +212,108 @@ class ProcessManager:
 
         # CPU 활동률 계산
         cpu_activity = self._calculate_cpu_activity(p.pid, p.utime, p.stime, pod_name, current_time)
-
-        # 프로세스 나이 계산
+        # 프로세스 나이(경과 시간) 계산
         process_age = self._calculate_process_age(p.starttime, btime, current_time)
 
-        # 2. 프로세스의 경과 시간 기반 판단 (활성)
-        if process_age < self.active_age_threshold:
+        # 2. 프로세스 경과 시간 기반 판단 (활성)
+        # 결과 시간 < 5분
+        if process_age < ProcessStatePolicy.ACTIVE_NEW_AGE_THRESHOLD:
             return {
                 'pid': p.pid,
                 'comm': p.comm,
                 'state': ProcessStateClassification.ACTIVE,
-                'reason': 'new_process',
+                'reason': 'cpu_activity_none',
                 'cpu_activity': cpu_activity,
                 'age_hours': process_age / 3600
             }
 
-        # 3. 프로세스 활동률 기반 판단
-        if cpu_activity is not None:
-            if cpu_activity < self.active_age_threshold:
+        # 3. CPU 활동률 기반 상태 판단
+        # CPU 활동률이 None일 경우
+        if cpu_activity is None:
+            return {
+                'pid': p.pid,
+                'comm': p.comm,
+                'state': ProcessStateClassification.IDLE,
+                'reason': 'default_idle',
+                'cpu_activity': cpu_activity,
+                'age_hours': process_age / 3600
+            }
+        # CPU 활동률 > 1%
+        if cpu_activity > ProcessStatePolicy.ACTIVE_CPU_THRESHOLD:
+            return {
+                'pid': p.pid,
+                'comm': p.comm,
+                'state': ProcessStateClassification.ACTIVE,
+                'reason': 'high_cpu_activity',
+                'cpu_activity': cpu_activity,
+                'age_hours': process_age / 3600
+            }
+
+        # 4. 종합적인 분류
+        # CPU 활동률이 매우 낮거나 없는 경우 (CPU activity < 1%)
+        # 경과 시간 >= 24h
+        if process_age >= ProcessStatePolicy.IDLE_AGE_THRESHOLD:
+            return {
+                'pid': p.pid,
+                'comm': p.comm,
+                'state': ProcessStateClassification.GC,
+                'reason': 'very_old_process',
+                'cpu_activity': cpu_activity,
+                'age_hours': process_age / 3600
+            }
+        # 경과 시간 < 1h
+        elif process_age < ProcessStatePolicy.ACTIVE_AGE_THRESHOLD:
+            # 0 < CPU 활동률 <= 1%
+            if cpu_activity > ProcessStatePolicy.IDLE_CPU_THRESHOLD:
                 return {
                     'pid': p.pid,
                     'comm': p.comm,
                     'state': ProcessStateClassification.ACTIVE,
-                    'reason': 'high_cpu_activity',
+                    'reason': 'low_cpu_activity_1h',
                     'cpu_activity': cpu_activity,
                     'age_hours': process_age / 3600
                 }
-            elif cpu_activity > self.idle_age_threshold:
+            # CPU 활동률 = 0
+            elif cpu_activity == ProcessStatePolicy.IDLE_CPU_THRESHOLD:
                 return {
                     'pid': p.pid,
                     'comm': p.comm,
                     'state': ProcessStateClassification.IDLE,
-                    'reason': 'low_cpu_activity',
+                    'reason': 'very_low_cpu_activity_1h',
                     'cpu_activity': cpu_activity,
                     'age_hours': process_age / 3600
                 }
-        # 4. CPU 활동률이 없거나 매우 낮은 경우
-        # 작성 필요
+        # 경과 시간 < 24h
+        elif process_age < ProcessStatePolicy.IDLE_AGE_THRESHOLD:
+            # 0 < CPU 활동률 <= 1%
+            if cpu_activity > ProcessStatePolicy.IDLE_CPU_THRESHOLD:
+                return {
+                    'pid': p.pid,
+                    'comm': p.comm,
+                    'state': ProcessStateClassification.IDLE,
+                    'reason': 'old_process',
+                    'cpu_activity': cpu_activity,
+                    'age_hours': process_age / 3600
+                }
+            # CPU 활동률 = 0
+            elif cpu_activity == ProcessStatePolicy.IDLE_CPU_THRESHOLD:
+                return {
+                    'pid': p.pid,
+                    'comm': p.comm,
+                    'state': ProcessStateClassification.GC,
+                    'reason': 'old_and_very_low_cpu_activity',
+                    'cpu_activity': cpu_activity,
+                    'age_hours': process_age / 3600
+                }
+        # 모두 해당하지 않는 경우(예외, idle로 간주)
+        return{
+            'pid': p.pid,
+            'comm': p.comm,
+            'state': ProcessStateClassification.IDLE,
+            'reason': 'except_idle',
+            'cpu_activity': cpu_activity,
+            'age_hours': process_age / 3600
+        }
 
     def _calculate_cpu_activity(self, pid, utime, stime, pod_name, current_time) -> Optional[float]:
         """
@@ -280,6 +356,22 @@ class ProcessManager:
         """
         p_start_time = btime + (starttime / self.cpu_ticks_per_sec)
         return current_time - p_start_time
+
+    def _update_cpu_states(self, pod_name, processes, current_time):
+        """
+        현재 CPU 통계를 저장
+        """
+        self.previous_cpu_states[pod_name] = {
+            'timestamp': current_time,
+            'processes': {}
+        }
+
+        for p in processes:
+            self.previous_cpu_states[pod_name]['processes'][p.pid] = {
+                'utime': p.utime,
+                'stime': p.stime,
+                'comm': p.comm
+            }
 
 if __name__ == "__main__":
     startTime = time.time()
