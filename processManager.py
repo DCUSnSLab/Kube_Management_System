@@ -169,6 +169,8 @@ class ProcessManager:
         }
         for process in processes:
             classification = self._classify_process(process, pod_name, current_time, boot_time)
+            # print(classification)
+            # print(process.ppid)
             process_classification.append(classification)
 
             # 분류 결과 요약
@@ -206,7 +208,7 @@ class ProcessManager:
                 'pid': p.pid,
                 'comm': p.comm,
                 'state': ProcessStateClassification.ACTIVE,
-                'reason': 'Active_state',
+                'reason': 'Running_state',
                 'cpu_activity': None
             }
 
@@ -222,7 +224,7 @@ class ProcessManager:
                 'pid': p.pid,
                 'comm': p.comm,
                 'state': ProcessStateClassification.ACTIVE,
-                'reason': 'cpu_activity_none',
+                'reason': 'new_process_5m',
                 'cpu_activity': cpu_activity,
                 'age_hours': process_age / 3600
             }
@@ -234,7 +236,7 @@ class ProcessManager:
                 'pid': p.pid,
                 'comm': p.comm,
                 'state': ProcessStateClassification.IDLE,
-                'reason': 'default_idle',
+                'reason': 'cpu_activity_None',
                 'cpu_activity': cpu_activity,
                 'age_hours': process_age / 3600
             }
@@ -322,7 +324,8 @@ class ProcessManager:
             None or CPU 활동률 (0.0 ~ 1.0): float
             이전 계산 값이 없을 경우 None 반환
         """
-        if pod_name in self.previous_cpu_states:
+        if pod_name not in self.previous_cpu_states:
+            # print(f"No previous CPU data process {pid} in {pod_name}")
             return None
 
         prev_states = self.previous_cpu_states[pod_name].get('processes', {})
