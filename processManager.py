@@ -55,14 +55,21 @@ class ProcessManager:
             return None
 
     def getProcStat_v2(self):
-        # 자기 자신을 제외하는 쉘 스크립트 사용
+        # 자기 자신을 제외하고, PPID가 1인 'sleep' 프로세스도 제외하는 쉘 스크립트 사용
         command = [
             "sh", "-c",
             "SELF_PID=$$ && "
             "for stat in /proc/[0-9]*/stat; do "
             "  if [ -r \"$stat\" ]; then "
             "    PID=$(basename $(dirname \"$stat\")) && "
-            "    [ \"$PID\" != \"$SELF_PID\" ] && cat \"$stat\" 2>/dev/null; "
+            "    if [ \"$PID\" != \"$SELF_PID\" ]; then "
+            "      STAT_LINE=$(cat \"$stat\" 2>/dev/null) && "
+            "      COMM=$(echo \"$STAT_LINE\" | awk '{print $2}') && "
+            "      PPID=$(echo \"$STAT_LINE\" | awk '{print $4}') && "
+            "      if ! ([ \"$PPID\" = \"1\" ] && [ \"$COMM\" = \"(sleep)\" ]); then "
+            "        echo \"$STAT_LINE\"; "
+            "      fi; "
+            "    fi; "
             "  fi; "
             "done"
         ]
@@ -183,6 +190,7 @@ class ProcessManager:
                 if classification['reason'] == 'Zombie':
                     process_summary['zombie'] += 1
 
+        # print(process_summary)
         # 현재 CPU 통계 저장
         self._update_cpu_states(pod_name, processes, current_time)
 
