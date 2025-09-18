@@ -15,8 +15,9 @@ class SleepPodController(Generator):
     기존 생성기를 상속받도록 만듦
     """
     def __init__(self, namespace: str = 'gc-simulator'):
-        config.load_kube_config()
-        self.core_v1 = client.CoreV1Api()
+        super().__init__(namespace)
+        # config.load_kube_config()
+        # self.coreV1 = client.CoreV1Api()
         self.namespace = namespace
 
         self.interval = 60  # 1분 간격 검사
@@ -64,25 +65,32 @@ class SleepPodController(Generator):
             self.createSleepPod(active, 'active')
             self.createSleepPod(idle, 'idle')
 
+            pods = self.coreV1.list_namespaced_pod(self.namespace).items
+            pod_names = [pod.metadata.name for pod in pods]
+            self.waitForPodRunning(pod_names)
             manager = {}
             i = 0
             while i < self.cnt:
-                pods = self.core_v1.list_namespaced_pod(self.namespace).items
-                pod_names = [pod.metadata.name for pod in pods]
-                self.waitForPodRunning(pod_names)
-
+                print("\n\n")
+                print("="*50)
+                print(f"Start {i} times")
+                print("="*50)
+                pods = self.coreV1.list_namespaced_pod(self.namespace).items
                 for p in pods:
                     if p.metadata.name not in manager:
-                        manager[p.metadata.name] = ProcessManager(self.core_v1, p)
-                    pod = Pod(self.core_v1, p)
+                        manager[p.metadata.name] = ProcessManager(self.coreV1, p)
+                    pod = Pod(self.coreV1, p)
                     pod.insertProcessData()
 
+                    filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
+
                     pm = manager[p.metadata.name]
-                    classification, summary = pm.analyze(pod.processes)
+                    classification, summary = pm.analyze(filtered_processes)
                     self.saveClassificationToCsv(classification, p.metadata.name)
                     self.saveSummaryToCsv(summary, p.metadata.name)
                 i += 1
                 time.sleep(self.interval)
+            self.deletePod()
 
         except KeyboardInterrupt:
             print("Keyboard Interrupted. Cleanning up...")
@@ -104,7 +112,7 @@ class SleepPodController(Generator):
             self.sleep_pod_manifest['metadata']['name'] = state+'-'+str(count)
             next(env for env in self.sleep_pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = state
 
-            self.core_v1.create_namespaced_pod(namespace=self.namespace, body=self.sleep_pod_manifest)
+            self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.sleep_pod_manifest)
             print(f"{state} pod {count} created")
             count += 1
 
@@ -115,7 +123,7 @@ class SleepPodController(Generator):
         while True:
             all_running = True
             for pod_name in pods:
-                pod = self.core_v1.read_namespaced_pod(pod_name, self.namespace)
+                pod = self.coreV1.read_namespaced_pod(pod_name, self.namespace)
                 phase = pod.status.phase
                 pod_statuses[pod_name] = phase
                 print(f"[STATUS] Pod {pod_name} -> {phase}")
@@ -135,9 +143,9 @@ class SleepPodController(Generator):
         classification: 프로세스별 분석 결과
         summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
         """
-        filename = "./data/experiment_sleep_classification.csv"
+        filename = "data/experiment_sleep_classification.csv"
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         if not classification:
             return
@@ -155,15 +163,15 @@ class SleepPodController(Generator):
                 writer.writeheader()
             writer.writerows(classification)
 
-        print(f"[SAVE] Appended {len(classification)} rows from {pod_name} to {filename}")
+        print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
 
     def saveSummaryToCsv(self, summary, pod_name):
         """
         모든 파드 summary 결과를 하나의 CSV에 누적 저장
         """
-        filename = "./data/experiment_sleep_summary.csv"
+        filename = "data/experiment_sleep_summary.csv"
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         if not summary:
             return
@@ -180,9 +188,9 @@ class SleepPodController(Generator):
                 writer.writeheader()
             writer.writerow(row)
 
-        print(f"[SAVE] Appended summary for {pod_name} to {filename}")
-
+        print(f"[SAVE - summary] Appended summary for {pod_name} to {filename}")
 
 if __name__ == "__main__":
     spc = SleepPodController()
     spc.experiment()
+    # spc.deletePod()
