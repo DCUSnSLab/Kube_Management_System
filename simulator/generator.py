@@ -4,6 +4,9 @@ from garbagecollector import GarbageCollector
 from multiprocessing import Process, Event
 import random
 
+from pod import Pod
+from processManager import ProcessManager
+
 def run_gc(ns, sc):
     gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
     gc.manage()
@@ -107,7 +110,7 @@ class Generator:
                 self.gc_process.join()
 
     def experimentDataCollection(self, interval=60, cnt = 1):
-        active, idle = self.generateRandomNumber(100, 2)
+        active, idle = self.generateRandomNumber(10, 2)
         active, bg_active, running = self.generateRandomNumber(active, 3)
         try:
             self.createPod_atOnce(active, 'active', 'active')
@@ -125,6 +128,18 @@ class Generator:
                 print(f"Start {self.count} times")
                 print("=" * 50)
                 self.getPodList()
+
+                # 추후에 변경할 예정
+                for p_name, p in self.pod_list.items():
+                    if p_name not in manager:
+                        manager[p_name] = ProcessManager(self.coreV1, p)
+                    pod = Pod(self.coreV1, p)
+                    pod.insertProcessData()
+
+                    filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
+
+                    pm = manager[p_name]
+                    pm.analyzePodProcess(pod.processes)
 
                 time.sleep(interval)
 
@@ -205,7 +220,7 @@ class Generator:
             print(f"{state} pod {count} created")
             count += 1
 
-    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.7, max_ratio=0.9):
+    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.5, max_ratio=0.9):
         """
         랜덤 숫자 생성 (비율에 맞게 생성)
         """

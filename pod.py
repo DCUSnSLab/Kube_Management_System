@@ -1,3 +1,5 @@
+import csv
+
 from process import Process, Mode_State, Policy_State
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from historyManager import HistoryManager
@@ -23,10 +25,24 @@ class Pod():
         self.pod = pod
         self.pod_name = pod.metadata.name
         self.namespace = pod.metadata.namespace
-        self.check_history_result = None
+
         self.processes = list()
         self.pod_status = None  # list -> obj
         self.pod_lifecycle = None  # list -> obj
+        self.hm = HistoryManager(self.api, self.pod)
+        self.pm = ProcessManager(self.api, self.pod)
+
+        # 분석 결과 (커맨드 히스토리, 프로세스)
+        self.result_command_history: bool = None
+        self.result_process: bool = None
+        self.reason_process: str = None
+
+    def test(self):
+        if self.result_command_history==None:
+            self.result_command_history = False
+        else:
+            print(self.result_command_history)
+
 
     def get_Timestamp(self):
         """시간대를 UTC로 통일"""
@@ -92,28 +108,33 @@ class Pod():
         if self.pod_lifecycle is None:
             self.pod_lifecycle = Pod_Lifecycle()
         """When pod deleted, save time and because of pod deleted"""
-        self.pod_lifecycle.reason_deletion = Reason_Deletion[reason].value
+        self.pod_lifecycle.reason_deletion = reason
         self.pod_lifecycle.deleteTime = self.get_Timestamp()
 
     def save_DeleteReason_to_DB(self):
         """Delete time and reason save to DB"""
         save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
 
-    def getResultHistory(self):
+    def getPodCommandHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
-        ch = HistoryManager(self.api, self.pod)
-        lastTime_Bash_history=ch.getLastUseTime()
-        self.check_history_result = ch.run(lastTime_Bash_history)
-        print(self.check_history_result)
+        lastTime_Bash_history=self.hm.getLastUseTime()
+        result = self.hm.analyze(lastTime_Bash_history)
+        print(result)
 
         # pod_lifecycle에 리스토리 검사 결과 저장
-        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
+        save_bash_history_result(self.pod_name, self.namespace, result)
 
         if lastTime_Bash_history is not None:
-            lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
+            lastTimeStamp_Bash_history = self.hm.checkTimestamp(lastTime_Bash_history)
             self.saveBash_history_to_DB(lastTimeStamp_Bash_history)
 
-        return self.check_history_result
+        # 7일이상 사용하지않으면 false 반환
+        if not result and self.checkCreateTime():
+            self.result_command_history = False
+        else:
+            self.result_command_history = True
+        
+        return self.result_command_history
 
     def saveBash_history_to_DB(self, last_modified_time):
         """Save bash history data to DB"""
@@ -138,14 +159,17 @@ class Pod():
         result = (now - creation_time) > timedelta(days=7)
         return result
 
-    def getResultProcess(self):
-        """process 데이터로 판별하기 위한 함수 (미완)"""
-        #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
-        # cp = CheckProcess(self.api, self.pod)
-        # cpResult = cp.run()
-        # print(cpResult)
-        # return cpResult
-        pass
+    def getPodProcessStatus(self):
+        """
+        프로세스를 가져와서 분석한 결과값을 가져오는 역할
+        """
+        self.insertProcessData()
+
+        self.result_process, self.reason_process, classification, summary = self.pm.analyzePodProcess(self.processes)
+        print("pod status: ", self.result_process)
+        print("reason process: ", self.reason_process)
+        # self.saveClassificationToCsv(classification, self.pod_name)
+        # self.saveSummaryToCsv(summary, self.pod_name)
 
     def resetProcessList(self):
         self.processes = []
@@ -154,8 +178,7 @@ class Pod():
         """get /proc/stat data amd split into 52"""
         self.resetProcessList()
 
-        cp = ProcessManager(self.api, self.pod)
-        process_data = cp.getProcStat()
+        process_data = self.pm.getProcStat()
         # 명령어의 결과값이 None일 경우 건너뛰도록
         if process_data is None:
             print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
@@ -174,7 +197,8 @@ class Pod():
             except ValueError:
                 print(f"Skipping invalid PID in line: {line}")
                 continue
-            p.comm = fields[1].strip('()')
+            p.comm = self.pm.getCmdlineInPod(p.pid)
+            print(p.comm)
             try:  # for undefined code
                 p.state = Mode_State[fields[2]].value
             except KeyError:
@@ -239,7 +263,7 @@ class Pod():
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
         print('-' * 50)
 
-    def saveDataToCSV(self):
+    def saveStatDataToCSV(self):
         """Save process data in csv file"""
         log_path = "/home/squirtle/Kube_Management_System/logging"
         date = datetime.now().strftime("%Y-%m-%d")
@@ -354,3 +378,80 @@ class Pod():
             })
 
         save_to_process(self.pod_name, self.namespace, processes)
+
+    def saveClassificationToCsv(self, classification, pod_name):
+        """
+        분류한 딕셔너리와 분류 결과 요약한 딕셔너리를 csv로 저장
+        classification: 프로세스별 분석 결과
+        summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
+        """
+        filename = "data_process/experiment_process_classification.csv"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if not classification:
+            return
+
+        for proc in classification:
+            proc["pod_name"] = pod_name
+            proc["timestamp"] = timestamp
+
+        file_exists = os.path.isfile(filename)
+        keys = classification[0].keys()
+
+        with open(filename, "a", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=keys)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerows(classification)
+
+        print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
+
+    def saveSummaryToCsv(self, summary, pod_name):
+        """
+        모든 파드 summary 결과를 하나의 CSV에 누적 저장
+        """
+        filename = "data_process/experiment_process_summary.csv"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if not summary:
+            return
+
+        row = {"pod_name": pod_name, "timestamp": timestamp}
+        row.update(summary)
+
+        file_exists = os.path.isfile(filename)
+        keys = row.keys()
+
+        with open(filename, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=keys)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+
+        print(f"[SAVE - summary] Appended summary for {pod_name} to {filename}")
+
+    def shouldGarbageCollection(self):
+        """
+        pod가 가비지 컬렉션에 의해 삭제되어야 하는지 판단
+        프로세스 분석 결과와 명령어 히스토리 결과를 확인
+
+        return:
+            - GC 여부: bool
+            - 이유: str
+            - 종류(hisotry or process): str
+        """
+        # 1. 명령어 히스토리 기반 분석
+        self.getPodCommandHistory()
+
+        # 2. 먼저 프로세스 기반 분석
+        self.getPodProcessStatus()
+
+        # 3. 판단
+        if not self.result_command_history:
+            return True, 'No usage history for more than a week', 'history'
+        elif self.result_process:
+            return True, self.reason_process, 'process'
+        else:
+            return False, None, 'active'

@@ -85,9 +85,9 @@ class SleepPodController(Generator):
                     filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
 
                     pm = manager[p.metadata.name]
-                    classification, summary = pm.analyze(filtered_processes)
-                    self.saveClassificationToCsv(classification, p.metadata.name)
-                    self.saveSummaryToCsv(summary, p.metadata.name)
+                    gc_decision = pm.analyzePodProcess(filtered_processes)
+                    self.saveClassificationToCsv(gc_decision['detailed_classification'], p.metadata.name)
+                    self.saveSummaryToCsv(gc_decision['process_summary'], p.metadata.name)
                 i += 1
                 time.sleep(self.interval)
 

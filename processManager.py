@@ -1,3 +1,6 @@
+import os
+from datetime import datetime
+import csv
 from enum import Enum
 from typing import Dict, Optional
 
@@ -29,32 +32,19 @@ class ProcessManager:
         self.v1 = api_instance
         self.pod = pod
         self.namespace: str = pod.metadata.namespace
-        self.used_commands: list = ["xargs", "sh", "cat", "bash"]
 
         self.cpu_ticks_per_sec = 100
         self.previous_cpu_states: dict = {}  # pod별 이전 CPU 통계 저장하는 딕셔너리
         self.sampling_interval = 60
+        self.time = time
 
-    def getProcStat(self):  # legacy (No use)
-        command = ["sh", "-c", "ls -d /proc/[0-9]* | xargs -I {} sh -c 'cat {}/stat 2>/dev/null'"]
-        try:
-            exec_command = stream.stream(
-                self.v1.connect_get_namespaced_pod_exec,
-                self.pod.metadata.name,
-                self.namespace,
-                command=command,
-                stderr=True, stdin=False,
-                stdout=True, tty=False
-            )
-            return self._filter_command_processes(exec_command)
-        except Exception as e:
-            if "Connection to remote host was lost" in str(e):
-                print(f"Connection to Pod '{self.pod.metadata.name}' was lost. Skipping this Pod.")
-            else:
-                print(f"An unexpected error occurred: {e}")
-            return None
+    def getPorcessData(self):
+        """
+        프로세스 정보를 수집하는 함수를 최종적으로 실햄
+        """
+        self.getProcStat()
 
-    def getProcStat_v2(self):
+    def getProcStat(self):
         # 자기 자신을 제외하고, PPID가 1인 'sleep' 프로세스도 제외하는 쉘 스크립트 사용
         command = [
             "sh", "-c",
@@ -90,59 +80,28 @@ class ProcessManager:
                 print(f"An unexpected error occurred: {e}")
             return None
 
-    def _filter_command_processes(self, exec_command):
+    def getCmdlineInPod(self, pid):
         """
-        Exclude processes where:
-        processes created by command execution
+        풀 커맨드(cmdline)를 얻으려면 Pod 안의 /proc/[pid]/cmdline을 읽어야함
         """
-        if not exec_command:
-            return ""
+        command = ["cat", f"/proc/{pid}/cmdline"]
+        exec_command = stream.stream(
+            self.v1.connect_get_namespaced_pod_exec,
+            self.pod.metadata.name,
+            self.namespace,
+            command=command,
+            stderr=True, stdin=False,
+            stdout=True, tty=False
+        )
+        return exec_command.replace("\x00", " ").strip()
 
-        filtered_processes: list = []
-        processes_info: list = []
-
-        for line in exec_command.splitlines():
-            fields = line.split()
-            if len(fields) > 2:
-                try:
-                    pid = int(fields[0])
-                    comm = fields[1].strip("()")
-                    ppid = int(fields[3])
-
-                    processes_info.append({
-                        'line': line,
-                        'pid': pid,
-                        'comm': comm,
-                        'ppid': ppid
-                    })
-                except (ValueError, IndexError):
-                    continue
-
-        # 필터링할 PID 수집 (set: 중복없이 수집)
-        filter_pids = set()
-
-        # used_commands에 있는 프로세스와 그 자식들 필터링
-        for proc in processes_info:
-            if proc['comm'] in self.used_commands:
-                filter_pids.add(proc['pid'])
-                # 이 프로세스의 자식들도 필터링
-                for child in processes_info:
-                    if child['ppid'] == proc['pid']:
-                        filter_pids.add(child['pid'])
-
-        # 필터링되지 않은 프로세스만 반환
-        for proc in processes_info:
-            if proc['pid'] not in filter_pids:
-                filtered_processes.append(proc['line'])
-
-        return "\n".join(filtered_processes)
-
-    def analyze(self, processes) -> Dict:
+    def analyzePodProcess(self, processes):
         """
         return:
         분석결과
           - should_gc(gc여부): bool
           - reason(gc이유): str
+          - detailed_classification(프로세스 분류 정보): dict
           - process_summary(프로세스 요약정보): dict
         """
         if not processes:
@@ -177,7 +136,6 @@ class ProcessManager:
         for process in processes:
             classification = self._classify_process(process, pod_name, current_time, boot_time)
             print(classification)
-            # print(process.ppid)
             process_classification.append(classification)
 
             # 분류 결과 요약
@@ -193,7 +151,11 @@ class ProcessManager:
         # print(process_summary)
         # 현재 CPU 통계 저장
         self._update_cpu_states(pod_name, processes, current_time)
-        return process_classification, process_summary
+
+        # GC 여부 결정
+        gc_decision = self._make_gc_decision(process_summary)
+
+        return gc_decision['should_gc'], gc_decision['reason'], process_classification, process_summary
 
     def _classify_process(self, p, pod_name: str, current_time, btime) -> Dict:
         """
@@ -387,6 +349,46 @@ class ProcessManager:
                 'comm': p.comm
             }
 
+    def _make_gc_decision(self, summary: dict) -> Dict:
+        """
+        프로세스 분석 결과를 바탕으로 GC 결정
+        Return:
+            GC 결정 결과: dict
+        """
+        # 1. 활성 프로세스가 있으면 유지
+        if summary['active'] > 0:
+            return{
+                'should_gc': False,
+                'reason': f"Pod has {summary['active']} active process(es)"
+            }
+
+        # 2. Zombie 프로세스가 있으면 즉시 GC
+        if summary['zombie'] > 0:
+            return {
+                'should_gc': True,
+                'reason': f"Found {summary['zombie']} zombie process(es)"
+            }
+
+        # 3. 모든 프로세스가 비활성이면 GC 고려
+        if summary['gc_candidates'] == summary['total']:
+            return {
+                'should_gc': True,
+                'reason': f"All process inactive, {summary['gc_candidates']} GC candidates"
+            }
+
+        # 4. 모든 프로세스가 유휴인 경우
+        if summary['idle'] == summary['total']:
+            return {
+                'should_gc': False,
+                'reason': f"All process idle, {summary['idle']} idle"
+            }
+
+        # 5. 기본적으로 GC하지 않음
+        return{
+            'should_gc': False,
+            'reason': f"Pod has {summary['idle']} idle and {summary['gc_candidates']} inactive process"
+        }
+
 if __name__ == "__main__":
     startTime = time.time()
 
@@ -399,7 +401,7 @@ if __name__ == "__main__":
             break
         p = ProcessManager(v1, pod)
         print(cnt, pod.metadata.name)
-        print(p.getProcStat_v2(),'\n')
+        print(p.getProcStat(), '\n')
         cnt += 1
 
     endTime = time.time()

@@ -32,7 +32,7 @@ class TestProcessManager:
                 pod.insertProcessData()
 
                 pm = manager[p.metadata.name]
-                pm.analyze(pod.processes)
+                pm.analyzePodProcess(pod.processes)
 
                 cnt += 1
             time += 1
