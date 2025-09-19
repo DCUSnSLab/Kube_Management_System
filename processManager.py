@@ -176,7 +176,7 @@ class ProcessManager:
         }
         for process in processes:
             classification = self._classify_process(process, pod_name, current_time, boot_time)
-            # print(classification)
+            print(classification)
             # print(process.ppid)
             process_classification.append(classification)
 
@@ -193,6 +193,7 @@ class ProcessManager:
         # print(process_summary)
         # 현재 CPU 통계 저장
         self._update_cpu_states(pod_name, processes, current_time)
+        return process_classification, process_summary
 
     def _classify_process(self, p, pod_name: str, current_time, btime) -> Dict:
         """
@@ -210,6 +211,12 @@ class ProcessManager:
                 'reason': 'Zombie',
                 'cpu_activity': 0
             }
+
+        # CPU 활동률 계산
+        cpu_activity = self._calculate_cpu_activity(p.pid, p.utime, p.stime, pod_name, current_time)
+        # 프로세스 나이(경과 시간) 계산
+        process_age = self._calculate_process_age(p.starttime, btime, current_time)
+
         # Running/Uninterruptible 프로세스는 활성
         if p.state in ProcessStatePolicy.ACTIVE_STATES:
             return {
@@ -217,25 +224,21 @@ class ProcessManager:
                 'comm': p.comm,
                 'state': ProcessStateClassification.ACTIVE,
                 'reason': 'Running_state',
-                'cpu_activity': None
-            }
-
-        # CPU 활동률 계산
-        cpu_activity = self._calculate_cpu_activity(p.pid, p.utime, p.stime, pod_name, current_time)
-        # 프로세스 나이(경과 시간) 계산
-        process_age = self._calculate_process_age(p.starttime, btime, current_time)
-
-        # 2. 프로세스 경과 시간 기반 판단 (활성)
-        # 결과 시간 < 5분
-        if process_age < ProcessStatePolicy.ACTIVE_NEW_AGE_THRESHOLD:
-            return {
-                'pid': p.pid,
-                'comm': p.comm,
-                'state': ProcessStateClassification.ACTIVE,
-                'reason': 'new_process_5m',
                 'cpu_activity': cpu_activity,
                 'age_hours': process_age / 3600
             }
+
+        # # 2. 프로세스 경과 시간 기반 판단 (활성)
+        # # 결과 시간 < 5분
+        # if process_age < ProcessStatePolicy.ACTIVE_NEW_AGE_THRESHOLD:
+        #     return {
+        #         'pid': p.pid,
+        #         'comm': p.comm,
+        #         'state': ProcessStateClassification.ACTIVE,
+        #         'reason': 'new_process_5m',
+        #         'cpu_activity': cpu_activity,
+        #         'age_hours': process_age / 3600
+        #     }
 
         # 3. CPU 활동률 기반 상태 판단
         # CPU 활동률이 None일 경우

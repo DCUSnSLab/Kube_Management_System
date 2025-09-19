@@ -90,10 +90,11 @@ class SleepPodController(Generator):
                     self.saveSummaryToCsv(summary, p.metadata.name)
                 i += 1
                 time.sleep(self.interval)
-            self.deletePod()
 
         except KeyboardInterrupt:
             print("Keyboard Interrupted. Cleanning up...")
+
+        finally:
             self.deletePod()
 
     def createRamdomNumPair(self, total=100, min_ratio=0.3, max_ratio=0.7):
@@ -115,27 +116,6 @@ class SleepPodController(Generator):
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.sleep_pod_manifest)
             print(f"{state} pod {count} created")
             count += 1
-
-    def waitForPodRunning(self, pods, interval=5):
-        start_time = time.time()
-        pod_statuses = {p: "Pending" for p in pods}
-
-        while True:
-            all_running = True
-            for pod_name in pods:
-                pod = self.coreV1.read_namespaced_pod(pod_name, self.namespace)
-                phase = pod.status.phase
-                pod_statuses[pod_name] = phase
-                print(f"[STATUS] Pod {pod_name} -> {phase}")
-
-                if phase != "Running":
-                    all_running = False
-
-            if all_running:
-                print("[READY] All pods are Running")
-                break
-
-            time.sleep(interval)
 
     def saveClassificationToCsv(self, classification, pod_name):
         """

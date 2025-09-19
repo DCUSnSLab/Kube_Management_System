@@ -2,6 +2,7 @@ from kubernetes import client, config, utils
 import time
 from garbagecollector import GarbageCollector
 from multiprocessing import Process, Event
+import random
 
 def run_gc(ns, sc):
     gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
@@ -105,6 +106,41 @@ class Generator:
                 self.stop_event.set()
                 self.gc_process.join()
 
+    def experimentDataCollection(self, interval=60, cnt = 1):
+        active, idle = self.generateRandomNumber(100, 2)
+        active, bg_active, running = self.generateRandomNumber(active, 3)
+        try:
+            self.createPod_atOnce(active, 'active', 'active')
+            self.createPod_atOnce(bg_active, 'background', 'background_active')
+            self.createPod_atOnce(running, 'running', 'running')
+            self.createPod_atOnce(idle, 'idle', 'idle')
+
+            self.getPodList()
+            self.waitForPodRunning(self.pod_list)
+
+            manager = {}
+            while self.count < cnt:
+                print("\n\n")
+                print("=" * 50)
+                print(f"Start {self.count} times")
+                print("=" * 50)
+                self.getPodList()
+
+                time.sleep(interval)
+
+                self.count += 1
+
+        except KeyboardInterrupt:
+            print("Keyboard Interrupted. Cleanning up...")
+
+        finally:
+            self.deletePod()
+
+            # simulator end(or except) and gc stop
+            if self.gc_process.is_alive():
+                self.stop_event.set()
+                self.gc_process.join()
+
     def createPod(self, ac, idle, run, bg):
         """
         Create pod
@@ -153,6 +189,66 @@ class Generator:
             print('background active pod', self.bg_active, ' created')
             self.bg_active += 1
 
+    def createPod_atOnce(self, total, name, state, numProc=1, isMIX='single'):
+        """
+        create pod
+        arg: total(생성 수), state(상태), numProc(프로세스 수), isMIX(single or mix)
+        """
+        count = 0
+        while count < total:
+            self.pod_manifest['metadata']['name'] = name+'-'+str(count)
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = state
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = str(numProc)
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_MIX')['value'] = isMIX
+
+            self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
+            print(f"{state} pod {count} created")
+            count += 1
+
+    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.7, max_ratio=0.9):
+        """
+        랜덤 숫자 생성 (비율에 맞게 생성)
+        """
+        if numCreate < 2:
+            return total
+
+        if numCreate == 2:
+            a = int(total * random.uniform(min_ratio, max_ratio))
+            b = total - a
+            return a, b
+
+        else:
+            # 비율 나누기 (0 ~ 1)
+            parts = [random.random() for _ in range(numCreate)]
+            s = sum(parts)
+            numbers = [int(total * p / s) for p in parts]
+
+            # 합이랑 맞추기 위해 보정
+            diff = total - sum(numbers)
+            numbers[-1] += diff
+
+            return numbers
+
+    def waitForPodRunning(self, pods, interval=5):
+        pod_statuses = {p: "Pending" for p in pods}
+
+        while True:
+            all_running = True
+            for pod_name in pods:
+                pod = self.coreV1.read_namespaced_pod(pod_name, self.namespace)
+                phase = pod.status.phase
+                pod_statuses[pod_name] = phase
+                print(f"[STATUS] Pod {pod_name} -> {phase}")
+
+                if phase != "Running":
+                    all_running = False
+
+            if all_running:
+                print("[READY] All pods are Running")
+                break
+
+            time.sleep(interval)
+
     def deletePod(self):
         """
         Delete all pod
@@ -189,7 +285,7 @@ class Generator:
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
     generator = Generator()
-    generator.run()
+    generator.experimentDataCollection()
     # generator.deletePod()
     # while True:
     #     if generator.checkStatus():
