@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Python 패키지 설치
+RUN pip install --no-cache-dir psutil
+
 # 작업 디렉토리 설정
 WORKDIR /app
 

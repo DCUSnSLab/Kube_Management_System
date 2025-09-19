@@ -3,6 +3,7 @@ import sys
 import time
 import signal
 import gc
+import psutil  # 메모리 모니터링용
 
 """
 Active Process - Memory Intensive
@@ -24,9 +25,23 @@ class MemoryBlock:
 
 def main():
     print(f"[ACTIVE] Memory Intensive Process Started - PID: {os.getpid()}", flush=True)
-    blocks, total_alloc, max_memory = [], 0, 500
-    block_size = 10
+    blocks, total_alloc, max_memory = [], 0, 120  # 200Mi 제한에서 안전하게 120MB
+    block_size = 5  # 5MB (활성 유지)
     while True:
+        # 시스템 메모리 사용률 확인
+        try:
+            memory_percent = psutil.virtual_memory().percent
+            if memory_percent > 85:
+                print(f"[ACTIVE] System memory usage high: {memory_percent:.1f}%, cleaning...", flush=True)
+                if blocks:
+                    for _ in range(min(3, len(blocks))):
+                        released = blocks.pop(0)
+                        total_alloc -= released.size
+                        del released
+                    gc.collect()
+        except:
+            pass  # psutil 오류 무시
+        
         if total_alloc < max_memory:
             try:
                 block = MemoryBlock(block_size)
@@ -40,8 +55,19 @@ def main():
                     del released
                     gc.collect()
         else:
-            for block in blocks[:5]:
-                block.data[0] = (block.data[0] + 1) % 256
+            # 메모리 청리: 오래된 블록 제거
+            if len(blocks) > 15:
+                for _ in range(5):
+                    if blocks:
+                        released = blocks.pop(0)
+                        total_alloc -= released.size
+                        del released
+                gc.collect()
+                print(f"[ACTIVE] Memory cleaned: {total_alloc}MB", flush=True)
+            else:
+                # 더 활발한 작업
+                for block in blocks[:8]:
+                    block.data[0] = (block.data[0] + 1) % 256
         time.sleep(2)
 
 if __name__ == "__main__":

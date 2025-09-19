@@ -9,7 +9,7 @@ df = pd.read_csv(file_path)
 
 # state 컬럼에서 'ProcessStateClassification.' 문자열 제거
 df["state"] = df["state"].str.replace("ProcessStateClassification.", "", regex=False)
-df["cpu_activity"] = df["cpu_activity"].round(3)
+# df["cpu_activity"] = df["cpu_activity"].round(6)
 
 # pod_name 별로 나열 (state, reason, cpu_activity만 표시)
 result = df.groupby("pod_name")[["state", "reason", "cpu_activity"]] \
