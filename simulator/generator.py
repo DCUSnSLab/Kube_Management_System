@@ -19,7 +19,7 @@ class Generator:
         self.namespace: str = namespace
         self.pod_list: dict = {}
         self.intervalTime = 120  # pod 생성 반복 주기
-        self.times = 5  # 반복할 횟수
+        self.times = 10  # 반복할 횟수
         self.count = 0  # 반복한 횟수
         self.active = 0  # active pods
         self.idle = 0  # idle pods
@@ -109,52 +109,65 @@ class Generator:
                 self.stop_event.set()
                 self.gc_process.join()
 
-    def experimentDataCollection(self, interval=60, cnt = 1):
-        active, idle = self.generateRandomNumber(10, 2)
-        active, bg_active, running = self.generateRandomNumber(active, 3)
-        try:
-            self.createPod_atOnce(active, 'active', 'active')
-            self.createPod_atOnce(bg_active, 'background', 'background_active')
-            self.createPod_atOnce(running, 'running', 'running')
-            self.createPod_atOnce(idle, 'idle', 'idle')
+    def experimentDataCollection(self, interval=60, cnt = 60):
+        i = 0
+        while i < self.times:  # times = 10
+            self.pod_list={}
+            self.count = 0
 
-            self.getPodList()
-            self.waitForPodRunning(self.pod_list)
+            active, idle = self.generateRandomNumber(100, 2)
+            active, bg_active, running = self.generateRandomNumber(active, 3)
+            try:
+                self.createPod_atOnce(active, 'active', 'active')
+                self.createPod_atOnce(bg_active, 'background', 'background_active')
+                self.createPod_atOnce(running, 'running', 'running')
+                self.createPod_atOnce(idle, 'idle', 'idle')
 
-            manager = {}
-            while self.count < cnt:
-                print("\n\n")
-                print("=" * 50)
-                print(f"Start {self.count} times")
-                print("=" * 50)
                 self.getPodList()
+                self.waitForPodRunning(self.pod_list)
 
-                # 추후에 변경할 예정
-                for p_name, p in self.pod_list.items():
-                    if p_name not in manager:
-                        manager[p_name] = ProcessManager(self.coreV1, p)
-                    pod = Pod(self.coreV1, p)
-                    pod.insertProcessData()
+                manager = {}
+                while self.count < cnt:
+                    print("\n\n")
+                    print("=" * 50)
+                    print(f"Start experiment {i}, {self.count} times")
+                    print("=" * 50)
+                    self.getPodList()
 
-                    filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
+                    # 추후에 변경할 예정
+                    for p_name, p in self.pod_list.items():
+                        if p_name not in manager:
+                            manager[p_name] = Pod(self.coreV1, p)
+                        pod = manager[p_name]
+                        pod.getPodProcessStatus(i+1)  # i는 실험 횟수
 
-                    pm = manager[p_name]
-                    pm.analyzePodProcess(pod.processes)
+                        # filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
 
-                time.sleep(interval)
+                        # pm = manager[p_name]
+                        # pm.analyzePodProcess(pod.processes)
 
-                self.count += 1
+                    time.sleep(interval)
 
-        except KeyboardInterrupt:
-            print("Keyboard Interrupted. Cleanning up...")
+                    self.count += 1
+                self.deletePod()
+                while True:  # check delete pod status
+                    if self.checkStatus():
+                        break
+                    print("Deleting pod ------")
+                    time.sleep(1)
 
-        finally:
-            self.deletePod()
+            except KeyboardInterrupt:
+                print("Keyboard Interrupted. Cleanning up...")
 
-            # simulator end(or except) and gc stop
-            if self.gc_process.is_alive():
-                self.stop_event.set()
-                self.gc_process.join()
+            finally:
+                self.deletePod()
+
+                # simulator end(or except) and gc stop
+                if self.gc_process.is_alive():
+                    self.stop_event.set()
+                    self.gc_process.join()
+            i += 1
+        print("Finished generating")
 
     def createPod(self, ac, idle, run, bg):
         """
@@ -269,6 +282,8 @@ class Generator:
         Delete all pod
         """
         self.getPodList()
+        if not self.pod_list:
+            return
 
         for p in self.pod_list:
             self.coreV1.delete_namespaced_pod(p, self.namespace)

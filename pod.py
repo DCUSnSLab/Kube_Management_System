@@ -159,103 +159,22 @@ class Pod():
         result = (now - creation_time) > timedelta(days=7)
         return result
 
-    def getPodProcessStatus(self):
+    def getPodProcessStatus(self, experiment_id):
         """
         프로세스를 가져와서 분석한 결과값을 가져오는 역할
         """
-        self.insertProcessData()
+        processData = self.pm.getPorcessData()
+        self.processes = processData['processes']
+        cgroups = processData['cgroups']
+        timestamp = self.get_Timestamp()
 
         self.result_process, self.reason_process, classification, summary = self.pm.analyzePodProcess(self.processes)
-        print("pod status: ", self.result_process)
-        print("reason process: ", self.reason_process)
-        # self.saveClassificationToCsv(classification, self.pod_name)
-        # self.saveSummaryToCsv(summary, self.pod_name)
-
-    def resetProcessList(self):
-        self.processes = []
-
-    def insertProcessData(self):
-        """get /proc/stat data amd split into 52"""
-        self.resetProcessList()
-
-        process_data = self.pm.getProcStat()
-        # 명령어의 결과값이 None일 경우 건너뛰도록
-        if process_data is None:
-            print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
-            return
-
-        for line in process_data.splitlines():
-            fields = line.split()
-            if len(fields) < 2:  # 최소 2개의 필드가 있어야 함
-                continue
-
-            p = Process()
-
-            # Map fields to Process attributes
-            try:
-                p.pid = int(fields[0])
-            except ValueError:
-                print(f"Skipping invalid PID in line: {line}")
-                continue
-            p.comm = self.pm.getCmdlineInPod(p.pid)
-            print(p.comm)
-            try:  # for undefined code
-                p.state = Mode_State[fields[2]].value
-            except KeyError:
-                p.state = f"Unknown({fields[2]})"
-            p.ppid = int(fields[3])
-            p.pgrp = int(fields[4])
-            p.session = int(fields[5])
-            p.tty_nr = int(fields[6])
-            p.tpgid = int(fields[7])
-            p.flags = int(fields[8])
-            p.minflt = int(fields[9])
-            p.cminflt = int(fields[10])
-            p.majflt = int(fields[11])
-            p.cmajflt = int(fields[12])
-            p.utime = int(fields[13])
-            p.stime = int(fields[14])
-            p.cutime = int(fields[15])
-            p.cstime = int(fields[16])
-            p.priority = int(fields[17])
-            p.nice = int(fields[18])
-            p.num_threads = int(fields[19])
-            p.itrealvalue = int(fields[20])
-            p.starttime = int(fields[21])
-            p.vsize = int(fields[22])
-            p.rss = int(fields[23])
-            p.rsslim = int(fields[24])
-            p.startcode = int(fields[25])
-            p.endcode = int(fields[26])
-            p.startstack = int(fields[27])
-            p.kstkesp = int(fields[28])
-            p.kstkeip = int(fields[29])
-            p.signal = int(fields[30])
-            p.blocked = int(fields[31])
-            p.sigignore = int(fields[32])
-            p.sigcatch = int(fields[33])
-            p.wchan = int(fields[34])
-            p.nswap = int(fields[35])
-            p.cnswap = int(fields[36])
-            p.exit_signal = int(fields[37])
-            p.processor = int(fields[38])
-            p.rt_priority = int(fields[39])
-            p.policy = Policy_State(int(fields[40])).name
-            p.delayacct_blkio_ticks = int(fields[41])
-            p.guest_time = int(fields[42])
-            p.cguest_time = int(fields[43])
-            p.start_data = int(fields[44])
-            p.end_data = int(fields[45])
-            p.start_brk = int(fields[46])
-            p.arg_start = int(fields[47])
-            p.arg_end = int(fields[48])
-            p.env_start = int(fields[49])
-            p.env_end = int(fields[50])
-            p.exit_code = int(fields[51])
-
-            self.processes.append(p)
-
-        # self.printProcList()
+        # print("pod status: ", self.result_process)
+        # print("reason process: ", self.reason_process)
+        self.saveStatDataToCSV(timestamp, experiment_id)
+        self.saveCgroupMetricsToCSV(cgroups, timestamp, experiment_id)
+        self.saveClassificationToCsv(classification, self.pod_name, experiment_id)
+        self.saveSummaryToCsv(summary, self.pod_name, experiment_id)
 
     def printProcList(self):
         print('-'*50)
@@ -263,24 +182,26 @@ class Pod():
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
         print('-' * 50)
 
-    def saveStatDataToCSV(self):
-        """Save process data in csv file"""
-        log_path = "/home/squirtle/Kube_Management_System/logging"
-        date = datetime.now().strftime("%Y-%m-%d")
-        date_dir = os.path.join(log_path, date)
-        os.makedirs(date_dir, exist_ok=True)
+    def saveStatDataToCSV(self, timestamp, experiment_id=None):
+        """
+        Save process data in csv file
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
 
-        file_name = os.path.join(date_dir, f"{self.pod_name}.csv")
+        file_name = os.path.join(log_dir, f"process_metrics_experiment{experiment_id}.csv")
 
         headers = [
-            "timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
+            "pod_name","timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
             "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime",
             "priority", "nice", "num_threads", "itrealvalue", "starttime", "vsize", "rss",
             "rsslim", "startcode", "endcode", "startstack", "kstkesp", "kstkeip", "signal",
             "blocked", "sigignore", "sigcatch", "wchan", "nswap", "cnswap", "exit_signal",
             "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
             "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end",
-            "env_start", "env_end", "exit_code"
+            "env_start", "env_end", "exit_code",
+            "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches",
+            "vm_rss_status", "read_bytes", "write_bytes"
         ]
         file_exists = os.path.exists(file_name)
 
@@ -288,10 +209,9 @@ class Pod():
             if not file_exists:
                 file.write(",".join(headers) + "\n")  # 헤더 추가
 
-            timestamp = self.get_Timestamp()
-
             for process in self.processes:
-                field_values = [
+                stat_values = [
+                    self.pod_name,
                     timestamp,
                     str(process.pid), process.comm, process.state, str(process.ppid),
                     str(process.pgrp), str(process.session), str(process.tty_nr),
@@ -312,8 +232,53 @@ class Pod():
                     str(process.arg_end), str(process.env_start), str(process.env_end),
                     str(process.exit_code)
                 ]
-                file.write(",".join(field_values) + "\n")
+
+                # metrics 값 (없으면 빈칸)
+                if process.metrics:
+                    metrics_values = [
+                        str(process.metrics.voluntary_ctxt_switches or ""),
+                        str(process.metrics.nonvoluntary_ctxt_switches or ""),
+                        str(process.metrics.vm_rss or ""),
+                        str(process.metrics.read_bytes or ""),
+                        str(process.metrics.write_bytes or "")
+                    ]
+                else:
+                    metrics_values = ["", "", "", "", ""]
+                file.write(",".join([str(v) for v in (stat_values + metrics_values)]) + "\n")
+
             file.write("\n")
+
+    def saveCgroupMetricsToCSV(self, cgroup, timestamp, experiment_id=None):
+        """
+        Save cgroup metrics (memory, I/O) into CSV file
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(log_dir, exist_ok=True)
+
+        file_name = os.path.join(log_dir, f"cgroup_experiment{experiment_id}.csv")
+
+        headers = [
+            "pod_name", "timestamp",
+            "memory_current", "memory_limit",
+            "io_read_bytes", "io_write_bytes"
+        ]
+
+        file_exists = os.path.exists(file_name)
+
+        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            if not file_exists:
+                file.write(",".join(headers) + "\n")
+
+            row = [
+                self.pod_name,
+                timestamp,
+                str(cgroup.memory_current or ""),
+                str(cgroup.memory_limit or ""),
+                str(cgroup.io_read_bytes or ""),
+                str(cgroup.io_write_bytes or "")
+            ]
+
+            file.write(",".join(row) + "\n")
 
     def saveProcessDataToDB(self):
         """Save Pod's process data to DB"""
@@ -379,15 +344,18 @@ class Pod():
 
         save_to_process(self.pod_name, self.namespace, processes)
 
-    def saveClassificationToCsv(self, classification, pod_name):
+    def saveClassificationToCsv(self, classification, pod_name, experiment_id=None):
         """
         분류한 딕셔너리와 분류 결과 요약한 딕셔너리를 csv로 저장
         classification: 프로세스별 분석 결과
         summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
         """
-        filename = "data_process/experiment_process_classification.csv"
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+
+        filename = os.path.join(log_dir, f"process_classification_experiment{experiment_id}.csv")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
         if not classification:
             return
@@ -407,12 +375,14 @@ class Pod():
 
         print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
 
-    def saveSummaryToCsv(self, summary, pod_name):
+    def saveSummaryToCsv(self, summary, pod_name, experiment_id=None):
         """
         모든 파드 summary 결과를 하나의 CSV에 누적 저장
         """
-        filename = "data_process/experiment_process_summary.csv"
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+
+        filename = os.path.join(log_dir, f"process_summary_experiment{experiment_id}.csv")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         if not summary:
