@@ -200,7 +200,7 @@ def build_normalized_usage_table(
     """
     required = [
         "pod_name", "timestamp", "comm", "state", "pid",
-        "utime", "stime", "cutime",
+        "utime", "stime", "cutime", "minflt", "majflt",
         "num_threads",
         "vsize", "rss", "rsslim", "vm_rss_status",
         "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches",
@@ -233,7 +233,7 @@ def build_normalized_usage_table(
 
     # 누적값 컬럼 정의
     cumulative_cols = [
-        "utime", "stime", "cutime",
+        "utime", "stime", "cutime", "minflt", "majflt",
         "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches",
         "read_bytes", "write_bytes",
         "vsize", "rss", "rsslim"
@@ -285,6 +285,7 @@ def build_normalized_usage_table(
         "utime", "utime_delta",
         "stime", "stime_delta",
         "cutime", "cutime_delta",
+        "minflt", "majflt",
         "num_threads",
         "vsize", "vsize_delta",
         "rss", "rss_delta",
@@ -331,6 +332,6 @@ if __name__ == "__main__":
     for i, dataset in enumerate(datasets):
         normal_datas['experiment_'+str(i)] = (build_normalized_usage_table(datasets[i+1]))
     #showAll(df_usage)
-    #save_to_excel(normal_datas['experiment_'+str(1)], "usage2.xlsx")
+    save_to_excel(normal_datas['experiment_'+str(0)], "usage1.xlsx")
     print(normal_datas.keys())
-    main(normal_datas['experiment_'+str(1)])
+    main(normal_datas)

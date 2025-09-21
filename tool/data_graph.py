@@ -1,5 +1,5 @@
 import os, sys
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Union
 
 from PyQt5.QtGui import QGuiApplication
 
@@ -12,7 +12,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 # PyQt는 한 가지만 써야 합니다. (PyQt5와 PySide 혼용 금지)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QListWidget, QListWidgetItem, QTabWidget, QMessageBox,
@@ -122,6 +122,16 @@ def aggregate_series(sub: pd.DataFrame, metric: str, how: str) -> pd.Series:
     else:  # "Mean"
         return sub.groupby(GROUP_COL, as_index=True)[metric].mean().sort_index()
 
+def _rebuild_metric_combo(cb_metric: QComboBox, numeric_cols: list[str], prefer: str = "utime_delta"):
+    cb_metric.blockSignals(True)
+    cur = cb_metric.currentText()
+    cb_metric.clear()
+    cb_metric.addItems(numeric_cols)
+    idx = cb_metric.findText(cur)
+    if idx < 0:
+        idx = cb_metric.findText(prefer)
+    cb_metric.setCurrentIndex(idx if idx >= 0 else 0)
+    cb_metric.blockSignals(False)
 
 # ---------------------------
 # 템플릿 패널 (좌/우 단독)
@@ -289,82 +299,34 @@ class TemplatePanel(QWidget):
 # ---------------------------
 # 탭3: 멀티 시리즈 오버레이
 # ---------------------------
-class SeriesPanel(QWidget):
-    """ 오버레이용 단일 시리즈 설정 패널 (신호 연결은 부모가 담당) """
-    def __init__(self, title: str, df: pd.DataFrame, numeric_cols, parent=None):
-        super().__init__(parent)
-        self.df = df
-        self.numeric_cols = numeric_cols
-        self.ordinal_col = pick_ordinal_col(self.df)
-
-        box = QGroupBox(title)
-        lay = QVBoxLayout(box)
-
-        # 필터
-        filt = QHBoxLayout()
-        self.cb_pod_name = QComboBox(); init_combo(self.cb_pod_name, df, "pod_name")
-        filt.addWidget(QLabel("pod_name")); filt.addWidget(self.cb_pod_name)
-        self.cb_pod_ordinal = QComboBox(); init_combo(self.cb_pod_ordinal, df, self.ordinal_col)
-        filt.addWidget(QLabel(self.ordinal_col)); filt.addWidget(self.cb_pod_ordinal)
-        self.cb_comm = QComboBox(); init_combo(self.cb_comm, df, "comm")
-        filt.addWidget(QLabel("comm")); filt.addWidget(self.cb_comm)
-        self.cb_state = QComboBox(); init_combo(self.cb_state, df, "state")
-        filt.addWidget(QLabel("state")); filt.addWidget(self.cb_state)
-        lay.addLayout(filt)
-
-        # metric/agg
-        ctrl = QHBoxLayout()
-        self.cb_metric = QComboBox(); self.cb_metric.addItems(self.numeric_cols)
-        ctrl.addWidget(QLabel("Metric")); ctrl.addWidget(self.cb_metric)
-        self.cb_agg = QComboBox(); self.cb_agg.addItems(["Sum", "Mean"])
-        ctrl.addWidget(QLabel("Aggregation")); ctrl.addWidget(self.cb_agg)
-        ctrl.addStretch(1)
-        lay.addLayout(ctrl)
-
-        outer = QVBoxLayout(self)
-        outer.addWidget(box)
-
-    def filters(self):
-        return [
-            ("pod_name", combo_val(self.cb_pod_name)),
-            (self.ordinal_col, combo_val(self.cb_pod_ordinal)),
-            ("comm", combo_val(self.cb_comm)),
-            ("state", combo_val(self.cb_state)),
-        ]
-    def metric(self):
-        return self.cb_metric.currentText() if self.cb_metric.count() > 0 else None
-    def agg(self):
-        return self.cb_agg.currentText()
-
-
-# --- 교체용 OverlayTab (안전 초기화 + 지연 렌더링) ---
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QScrollArea, QGroupBox, QComboBox
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import pandas as pd
-
 # (유틸은 기존 코드 그대로 사용)
 # - select_numeric_metric_cols, pick_ordinal_col, init_combo, combo_val,
 #   apply_filters, aggregate_series, to_float_or_none
 # - SeriesPanel는 아래처럼 약간만 수정: 신호 연결은 부모에서 하고 redraw는 부모가 호출
 
 class SeriesPanel(QWidget):
-    def __init__(self, title: str, df: pd.DataFrame, numeric_cols, parent=None):
+    def __init__(self, title: str, df: pd.DataFrame, numeric_cols: list[str], datasets: dict[str, pd.DataFrame] = None, parent=None):
         super().__init__(parent)
         self.df = df
         self.numeric_cols = numeric_cols
+        self.datasets = datasets or {}
         self.ordinal_col = pick_ordinal_col(self.df)
+        self.on_delete = None
+        self.on_changed = None
 
-        self.on_delete = None  # ← 부모(OverlayTab)가 할당할 콜백
-
-        box = QGroupBox(title)
-        self._box = box  # 제목 갱신용
-
+        box = QGroupBox(title); self._box = box
         lay = QVBoxLayout(box)
 
-        # 상단 행: (필터 레이블들) + 우측에 삭제 버튼
         top_row = QHBoxLayout()
+
+        # ★ dataset 콤보
+        if self.datasets:
+            top_row.addWidget(QLabel("dataset"))
+            self.cb_dataset = QComboBox()
+            self.cb_dataset.addItems(list(self.datasets.keys()))
+            self.cb_dataset.setCurrentIndex(0)
+            self.cb_dataset.currentIndexChanged.connect(self._on_dataset_changed)
+            top_row.addWidget(self.cb_dataset)
 
         # 필터 영역
         self.cb_pod_name = QComboBox(); init_combo(self.cb_pod_name, df, "pod_name")
@@ -424,6 +386,28 @@ class SeriesPanel(QWidget):
             self.cb_metric.blockSignals(False)
             self.cb_agg.blockSignals(False)
 
+    def set_dataframe(self, df: pd.DataFrame, numeric_cols: list[str]):
+        self.df = df
+        self.numeric_cols = numeric_cols
+        self.ordinal_col = pick_ordinal_col(self.df)
+        init_combo(self.cb_pod_name, self.df, "pod_name")
+        init_combo(self.cb_pod_ordinal, self.df, self.ordinal_col)
+        init_combo(self.cb_comm, self.df, "comm")
+        init_combo(self.cb_state, self.df, "state")
+        _rebuild_metric_combo(self.cb_metric, self.numeric_cols, "utime_delta")
+
+    def _on_dataset_changed(self):
+        if not self.datasets:
+            return
+        key = self.cb_dataset.currentText()
+        df_new = prepare_df_base(self.datasets[key])
+        nc_new = select_numeric_metric_cols(df_new)
+        self.set_dataframe(df_new, nc_new)
+        self.set_defaults("utime_delta", "Mean")
+        # ★ 부모 redraw 대신 콜백 호출
+        if callable(self.on_changed):
+            self.on_changed()
+
     def current_filter_values(self):
         """라벨용: 현재 콤보 선택값을 그대로 반환(None이면 All로 표시 예정)"""
         return {
@@ -440,15 +424,22 @@ class SeriesPanel(QWidget):
             ("comm", combo_val(self.cb_comm)),
             ("state", combo_val(self.cb_state)),
         ]
+
+    def current_dataset(self) -> str:
+        if hasattr(self, "cb_dataset"):
+            return self.cb_dataset.currentText()
+        return "default"
+
     def metric(self): return self.cb_metric.currentText() if self.cb_metric.count()>0 else None
     def agg(self):    return self.cb_agg.currentText()
 
 class OverlayTab(QWidget):
     """ 멀티 시리즈 오버레이 탭 (Series 영역 고정, 그래프 영역 가변) """
-    def __init__(self, df: pd.DataFrame, numeric_cols, parent=None):
+    def __init__(self, df: pd.DataFrame, numeric_cols: list[str], datasets: dict[str, pd.DataFrame] = None, parent=None):
         super().__init__(parent)
         self.df = df
         self.numeric_cols = numeric_cols
+        self.datasets = datasets or {}
         self.series_panels = []
         self._ready = False
         self._child_windows = []
@@ -504,8 +495,8 @@ class OverlayTab(QWidget):
         QTimer.singleShot(0, self._post_init)
 
     def _open_detached_window(self):
-        win = OverlayWindow(self.df, self.numeric_cols)
-        self._child_windows.append(win)  # 참조 유지
+        win = OverlayWindow(self.df, self.numeric_cols, datasets=self.datasets)
+        self._child_windows.append(win)
         win.show()
         center_on_primary(win)
 
@@ -523,6 +514,7 @@ class OverlayTab(QWidget):
     def _wire_panel_signals(self, panel: SeriesPanel):
         # 변경: 삭제 콜백 연결
         panel.on_delete = self.remove_series
+        panel.on_changed = self._safe_redraw
 
         # 기존 필터/메트릭 변경 시그널
         panel.cb_pod_name.currentIndexChanged.connect(self._safe_redraw)
@@ -532,9 +524,12 @@ class OverlayTab(QWidget):
         panel.cb_metric.currentIndexChanged.connect(self._safe_redraw)
         panel.cb_agg.currentIndexChanged.connect(self._safe_redraw)
 
+        if hasattr(panel, "cb_dataset"):
+            panel.cb_dataset.currentIndexChanged.connect(self._safe_redraw)
+
     def _add_series(self, connect_signals=True, do_redraw=True):
         idx = len(self.series_panels) + 1
-        panel = SeriesPanel(f"Series {idx}", self.df, self.numeric_cols)
+        panel = SeriesPanel(f"Series {idx}", self.df, self.numeric_cols, datasets=self.datasets)
         panel.set_defaults("utime_delta", "Mean")
         if connect_signals:
             self._wire_panel_signals(panel)
@@ -576,9 +571,10 @@ class OverlayTab(QWidget):
 
     def _series_label(self, idx: int, sp: SeriesPanel, metric: str) -> str:
         fv = sp.current_filter_values()
-        # 라벨 구성: S{n}: {Agg} {Metric} | pod_name=..., pod_ordinal=..., comm=..., state=...
+        ds = sp.current_dataset()  # ★ dataset 이름 추가
         return (
             f"S{idx}: {sp.agg()} {metric} | "
+            f"dataset={ds}, "  # ★ 추가된 부분
             f"pod_name={self._fmt_val(fv.get('pod_name'))}, "
             f"pod_ordinal={self._fmt_val(fv.get('pod_ordinal'))}, "
             f"comm={self._fmt_val(fv.get('comm'))}, "
@@ -588,20 +584,32 @@ class OverlayTab(QWidget):
     def redraw(self):
         self.fig.clear()
         ax = self.fig.add_subplot(111)
-
         any_data = False
+
         for i, sp in enumerate(self.series_panels, start=1):
             metric = sp.metric()
             if not metric:
                 continue
 
-            sub = apply_filters(self.df, sp.filters())
+            df_i = sp.df
+            sub = apply_filters(df_i, sp.filters())
             s = aggregate_series(sub, metric, sp.agg())
             if s is None or len(s) == 0:
                 continue
 
+            # ★ delta 값 → 맨 처음 1개 제외
+            if metric.endswith("_delta"):
+                s = s.iloc[1:]
+
+            # ★ cpu_rate → 맨 처음 2개 제외
+            if metric == "cpu_rate":
+                s = s.iloc[3:]
+
+            if len(s) == 0:
+                continue
+
             any_data = True
-            label = self._series_label(i, sp, metric)  # ★ 라벨 생성
+            label = self._series_label(i, sp, metric)
             ax.plot(s.index.values, s.values, marker="o", label=label)
 
         if not any_data:
@@ -609,7 +617,6 @@ class OverlayTab(QWidget):
         else:
             ax.legend(loc="best")
 
-        # Y축 범위 처리 (기존 그대로)
         ymin = to_float_or_none(self.le_ymin.text())
         ymax = to_float_or_none(self.le_ymax.text())
         if ymin is not None or ymax is not None:
@@ -623,13 +630,11 @@ class OverlayTab(QWidget):
         self.canvas.draw()
 
 class OverlayWindow(QWidget):
-    """OverlayTab을 독립 윈도우로 띄우는 컨테이너"""
-    def __init__(self, df, numeric_cols, parent=None):
+    def __init__(self, df, numeric_cols, datasets=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Overlay (Detached)")
         lay = QVBoxLayout(self)
-        # 기존 OverlayTab 재사용
-        self.overlay = OverlayTab(df, numeric_cols)
+        self.overlay = OverlayTab(df, numeric_cols, datasets=datasets)  # ★
         lay.addWidget(self.overlay)
         self.resize(900, 600)
 
@@ -643,82 +648,96 @@ class CyclePlotterApp(QWidget):
     Tab3: 멀티 시리즈 오버레이(Series 추가 가능)
     모든 그래프에 Y축 min/max 설정 제공
     """
-    def __init__(self, df: pd.DataFrame, parent=None):
+    def __init__(self, data: Union[pd.DataFrame, Dict[str, pd.DataFrame]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Cycle-based Usage Plotter (3 Tabs)")
         self.resize(1500, 900)
 
-        self.df = prepare_df_base(df)
-        self.numeric_cols = select_numeric_metric_cols(self.df)
+        # --- 어댑터: DataFrame 또는 Dict[str, DataFrame] 모두 수용 ---
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("datasets dict가 비어 있습니다.")
+            # 각 DF 정규화
+            self.datasets: Dict[str, pd.DataFrame] = {
+                str(k): prepare_df_base(v) for k, v in data.items()
+            }
+        else:
+            # 단일 DF를 dict로 감싸서 처리(하위호환)
+            self.datasets = {"default": prepare_df_base(data)}
+        #self.numeric_cols = select_numeric_metric_cols(self.df)
 
         root = QVBoxLayout(self)
         self.tabs = QTabWidget()
         root.addWidget(self.tabs)
 
+        self.current_key = next(iter(self.datasets.keys()))
+        self.df = self.datasets[self.current_key]
+        self.numeric_cols = select_numeric_metric_cols(self.df)
+
         # ---------- Tab 1 ----------
-        self.tab3 = OverlayTab(self.df, self.numeric_cols)
+        self.tab3 = OverlayTab(self.df, self.numeric_cols, datasets=self.datasets)
         self.tabs.addTab(self.tab3, "Tab 1: Overlay (multi-series)")
 
-        # ---------- Tab 2 ----------
-        tab1 = QWidget(); l1 = QVBoxLayout(tab1)
-
-        # 공통 필터
-        filt_row = QHBoxLayout()
-        self.cb1_pod_name = QComboBox(); init_combo(self.cb1_pod_name, self.df, "pod_name")
-        self.cb1_ord_col = pick_ordinal_col(self.df)
-        self.cb1_pod_ordinal = QComboBox(); init_combo(self.cb1_pod_ordinal, self.df, self.cb1_ord_col)
-        self.cb1_comm = QComboBox(); init_combo(self.cb1_comm, self.df, "comm")
-        self.cb1_state = QComboBox(); init_combo(self.cb1_state, self.df, "state")
-        for lab, w in [("pod_name", self.cb1_pod_name), (self.cb1_ord_col, self.cb1_pod_ordinal),
-                       ("comm", self.cb1_comm), ("state", self.cb1_state)]:
-            filt_row.addWidget(QLabel(lab)); filt_row.addWidget(w)
-        filt_row.addStretch(1)
-        l1.addLayout(filt_row)
-
-        # 좌우 패널
-        panels_row1 = QHBoxLayout()
-        self.panel1_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=True)
-        self.panel1_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=True)
-        self.panel1_a.set_defaults("utime_delta", "Mean")
-        self.panel1_b.set_defaults("utime_delta", "Mean")
-        self.panel1_a.on_redraw = self.refresh_tab1
-        self.panel1_b.on_redraw = self.refresh_tab1
-
-        sep1 = QFrame(); sep1.setFrameShape(QFrame.VLine); sep1.setFrameShadow(QFrame.Sunken)
-        panels_row1.addWidget(self.panel1_a, stretch=1)
-        panels_row1.addWidget(sep1)
-        panels_row1.addWidget(self.panel1_b, stretch=1)
-        l1.addLayout(panels_row1)
-
-        # 필터 시그널
-        for cb in (self.cb1_pod_name, self.cb1_pod_ordinal, self.cb1_comm, self.cb1_state):
-            cb.currentIndexChanged.connect(self.refresh_tab1)
-
-        self.tabs.addTab(tab1, "Tab 2: Shared filters")
-
-        # ---------- Tab 3 ----------
-        tab2 = QWidget(); l2 = QVBoxLayout(tab2)
-        panels_row2 = QHBoxLayout()
-        self.panel2_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=False)
-        self.panel2_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=False)
-        self.panel2_a.set_defaults("utime_delta", "Mean")
-        self.panel2_b.set_defaults("utime_delta", "Mean")
-        self.panel2_a.on_redraw = self.refresh_tab2
-        self.panel2_b.on_redraw = self.refresh_tab2
-
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.VLine); sep2.setFrameShadow(QFrame.Sunken)
-        panels_row2.addWidget(self.panel2_a, stretch=1)
-        panels_row2.addWidget(sep2)
-        panels_row2.addWidget(self.panel2_b, stretch=1)
-        l2.addLayout(panels_row2)
-
-        self.tabs.addTab(tab2, "Tab 3: Independent filters per template")
-
-
-
-        # 초기 렌더
-        self.refresh_tab1()
-        self.refresh_tab2()
+        # # ---------- Tab 2 ----------
+        # tab1 = QWidget(); l1 = QVBoxLayout(tab1)
+        #
+        # # 공통 필터
+        # filt_row = QHBoxLayout()
+        # self.cb1_pod_name = QComboBox(); init_combo(self.cb1_pod_name, self.df, "pod_name")
+        # self.cb1_ord_col = pick_ordinal_col(self.df)
+        # self.cb1_pod_ordinal = QComboBox(); init_combo(self.cb1_pod_ordinal, self.df, self.cb1_ord_col)
+        # self.cb1_comm = QComboBox(); init_combo(self.cb1_comm, self.df, "comm")
+        # self.cb1_state = QComboBox(); init_combo(self.cb1_state, self.df, "state")
+        # for lab, w in [("pod_name", self.cb1_pod_name), (self.cb1_ord_col, self.cb1_pod_ordinal),
+        #                ("comm", self.cb1_comm), ("state", self.cb1_state)]:
+        #     filt_row.addWidget(QLabel(lab)); filt_row.addWidget(w)
+        # filt_row.addStretch(1)
+        # l1.addLayout(filt_row)
+        #
+        # # 좌우 패널
+        # panels_row1 = QHBoxLayout()
+        # self.panel1_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=True)
+        # self.panel1_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=True)
+        # self.panel1_a.set_defaults("utime_delta", "Mean")
+        # self.panel1_b.set_defaults("utime_delta", "Mean")
+        # self.panel1_a.on_redraw = self.refresh_tab1
+        # self.panel1_b.on_redraw = self.refresh_tab1
+        #
+        # sep1 = QFrame(); sep1.setFrameShape(QFrame.VLine); sep1.setFrameShadow(QFrame.Sunken)
+        # panels_row1.addWidget(self.panel1_a, stretch=1)
+        # panels_row1.addWidget(sep1)
+        # panels_row1.addWidget(self.panel1_b, stretch=1)
+        # l1.addLayout(panels_row1)
+        #
+        # # 필터 시그널
+        # for cb in (self.cb1_pod_name, self.cb1_pod_ordinal, self.cb1_comm, self.cb1_state):
+        #     cb.currentIndexChanged.connect(self.refresh_tab1)
+        #
+        # self.tabs.addTab(tab1, "Tab 2: Shared filters")
+        #
+        # # ---------- Tab 3 ----------
+        # tab2 = QWidget(); l2 = QVBoxLayout(tab2)
+        # panels_row2 = QHBoxLayout()
+        # self.panel2_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=False)
+        # self.panel2_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=False)
+        # self.panel2_a.set_defaults("utime_delta", "Mean")
+        # self.panel2_b.set_defaults("utime_delta", "Mean")
+        # self.panel2_a.on_redraw = self.refresh_tab2
+        # self.panel2_b.on_redraw = self.refresh_tab2
+        #
+        # sep2 = QFrame(); sep2.setFrameShape(QFrame.VLine); sep2.setFrameShadow(QFrame.Sunken)
+        # panels_row2.addWidget(self.panel2_a, stretch=1)
+        # panels_row2.addWidget(sep2)
+        # panels_row2.addWidget(self.panel2_b, stretch=1)
+        # l2.addLayout(panels_row2)
+        #
+        # self.tabs.addTab(tab2, "Tab 3: Independent filters per template")
+        #
+        #
+        #
+        # # 초기 렌더
+        # self.refresh_tab1()
+        # self.refresh_tab2()
         self.tab3.redraw()
 
     # -------- Tab1 --------
