@@ -1,0 +1,802 @@
+import os, sys
+from typing import List, Optional, Tuple
+
+from PyQt5.QtGui import QGuiApplication
+
+os.environ["QT_API"] = "pyqt5"
+# 맨 위쪽, matplotlib 관련 import 전에
+import matplotlib
+matplotlib.use("QtAgg")   # 반드시 FigureCanvas import 전에!
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+# PyQt는 한 가지만 써야 합니다. (PyQt5와 PySide 혼용 금지)
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox, QListWidget, QListWidgetItem, QTabWidget, QMessageBox,
+    QFrame, QPushButton, QLineEdit, QScrollArea, QGroupBox, QSizePolicy
+)
+
+import numpy as np
+import pandas as pd
+
+
+# 집계에서 제외할 컬럼들
+EXCLUDE_COLS = {
+    "pod_name", "pod_ordinal", "pod_ordinary",  # 오타 대응 포함
+    "comm", "state", "timestamp", "pid"
+}
+REQUIRED_FILTER_COLS = ["pod_name", "comm", "state"]
+GROUP_COL = "cycle_id"  # x축(시간 정규화)은 cycle_id
+
+
+# ---------------------------
+# 공통 유틸
+# ---------------------------
+def to_float_or_none(txt: str) -> Optional[float]:
+    if txt is None:
+        return None
+    s = str(txt).strip()
+    if s == "":
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def select_numeric_metric_cols(df: pd.DataFrame) -> List[str]:
+    numeric_cols = []
+    for c in df.columns:
+        if c in EXCLUDE_COLS or c == GROUP_COL:
+            continue
+        if pd.api.types.is_numeric_dtype(df[c]):
+            numeric_cols.append(c)
+    return numeric_cols if numeric_cols else ["utime_delta"]
+
+
+def prepare_df_base(df: pd.DataFrame) -> pd.DataFrame:
+    need = set(REQUIRED_FILTER_COLS + [GROUP_COL])
+    missing = [c for c in need if c not in df.columns]
+    if missing:
+        raise KeyError(f"필수 컬럼 누락: {missing} (필요: {sorted(need)})")
+    if "timestamp" in df.columns and not np.issubdtype(df["timestamp"].dtype, np.datetime64):
+        df = df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    return df.copy()
+
+
+def pick_ordinal_col(df: pd.DataFrame) -> str:
+    if "pod_ordinal" in df.columns:
+        return "pod_ordinal"
+    if "pod_ordinary" in df.columns:
+        return "pod_ordinary"
+    df["pod_ordinal"] = pd.Series([None] * len(df))
+    return "pod_ordinal"
+
+
+def init_combo(combo: QComboBox, df: pd.DataFrame, col: str, add_all=True):
+    combo.blockSignals(True)
+    combo.clear()
+    if add_all:
+        combo.addItem("All")
+    if col in df.columns:
+        vals = df[col].dropna().unique().tolist()
+        try:
+            vals = sorted(vals)
+        except Exception:
+            pass
+        for v in vals:
+            combo.addItem(str(v))
+    combo.blockSignals(False)
+
+
+def combo_val(cb: QComboBox) -> Optional[str]:
+    t = cb.currentText()
+    return None if (t is None or t == "" or t == "All") else t
+
+
+def apply_filters(df: pd.DataFrame, filters: List[Tuple[str, Optional[str]]]) -> pd.DataFrame:
+    out = df
+    for col, val in filters:
+        if val is None or col not in out.columns:
+            continue
+        if pd.api.types.is_numeric_dtype(out[col]):
+            try:
+                vnum = float(val)
+                out = out[out[col] == vnum]
+            except Exception:
+                out = out[out[col].astype(str) == val]
+        else:
+            out = out[out[col].astype(str) == str(val)]
+    return out
+
+
+def aggregate_series(sub: pd.DataFrame, metric: str, how: str) -> pd.Series:
+    if GROUP_COL not in sub.columns or metric not in sub.columns:
+        return pd.Series(dtype="float64")
+    if how == "Sum":
+        return sub.groupby(GROUP_COL, as_index=True)[metric].sum().sort_index()
+    else:  # "Mean"
+        return sub.groupby(GROUP_COL, as_index=True)[metric].mean().sort_index()
+
+
+# ---------------------------
+# 템플릿 패널 (좌/우 단독)
+# ---------------------------
+class TemplatePanel(QWidget):
+    """
+    - 옵션:
+      * shared_filters=True  : 부모가 제공하는 공통 필터만 사용
+      * shared_filters=False : 패널 자체적으로 독립 필터 제공
+    - 각 패널은 metric 콤보, aggregation 콤보, y axis (min/max) 입력, 그래프 포함
+    """
+    def __init__(self, title: str, df: pd.DataFrame, numeric_cols: List[str],
+                 shared_filters: bool, parent=None):
+        super().__init__(parent)
+        self.title = title
+        self.df = df
+        self.numeric_cols = numeric_cols
+        self.shared_filters = shared_filters
+
+        self.ordinal_col = pick_ordinal_col(self.df)
+
+        layout = QVBoxLayout(self)
+
+        # 필터 (독립 모드일 때만 표시)
+        if not self.shared_filters:
+            filt_box = QHBoxLayout()
+            # pod_name
+            self.cb_pod_name = QComboBox()
+            init_combo(self.cb_pod_name, self.df, "pod_name")
+            filt_box.addWidget(QLabel("pod_name"))
+            filt_box.addWidget(self.cb_pod_name)
+
+            # pod_ordinal
+            self.cb_pod_ordinal = QComboBox()
+            init_combo(self.cb_pod_ordinal, self.df, self.ordinal_col)
+            filt_box.addWidget(QLabel(self.ordinal_col))
+            filt_box.addWidget(self.cb_pod_ordinal)
+
+            # comm
+            self.cb_comm = QComboBox()
+            init_combo(self.cb_comm, self.df, "comm")
+            filt_box.addWidget(QLabel("comm"))
+            filt_box.addWidget(self.cb_comm)
+
+            # state
+            self.cb_state = QComboBox()
+            init_combo(self.cb_state, self.df, "state")
+            filt_box.addWidget(QLabel("state"))
+            filt_box.addWidget(self.cb_state)
+
+            filt_box.addStretch(1)
+            layout.addLayout(filt_box)
+
+        # 상단 컨트롤: Metric / Aggregation / Y range
+        ctrl = QHBoxLayout()
+        ctrl.addWidget(QLabel(f"{title} - Metric"))
+        self.cb_metric = QComboBox()
+        self.cb_metric.addItems(self.numeric_cols)
+        ctrl.addWidget(self.cb_metric)
+
+        ctrl.addSpacing(12)
+        ctrl.addWidget(QLabel("Aggregation"))
+        self.cb_agg = QComboBox()
+        self.cb_agg.addItems(["Sum", "Mean"])
+        ctrl.addWidget(self.cb_agg)
+
+        ctrl.addSpacing(12)
+        ctrl.addWidget(QLabel("Y min"))
+        self.le_ymin = QLineEdit()
+        self.le_ymin.setFixedWidth(90)
+        ctrl.addWidget(self.le_ymin)
+        ctrl.addWidget(QLabel("Y max"))
+        self.le_ymax = QLineEdit()
+        self.le_ymax.setFixedWidth(90)
+        ctrl.addWidget(self.le_ymax)
+
+        ctrl.addStretch(1)
+        layout.addLayout(ctrl)
+
+        # 그래프
+        self.fig = Figure(figsize=(5, 3))
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        # 콜백: 부모가 할당 (공유필터/독립필터 변경 시 다시 그림)
+        self.on_redraw = None
+
+        # 이벤트 연결
+        self.cb_metric.currentIndexChanged.connect(self._changed)
+        self.cb_agg.currentIndexChanged.connect(self._changed)
+        if not self.shared_filters:
+            for cb in (self.cb_pod_name, self.cb_pod_ordinal, self.cb_comm, self.cb_state):
+                cb.currentIndexChanged.connect(self._changed)
+        self.le_ymin.editingFinished.connect(self._changed)
+        self.le_ymax.editingFinished.connect(self._changed)
+
+    def _changed(self, *_):
+        if self.on_redraw:
+            self.on_redraw()
+
+    def set_defaults(self, default_metric: str = "utime_delta", default_agg: str = "Mean"):
+        # 신호 일시 차단
+        self.cb_metric.blockSignals(True)
+        self.cb_agg.blockSignals(True)
+        try:
+            # metric 기본값
+            if self.cb_metric.count() > 0:
+                idx = self.cb_metric.findText(default_metric)
+                self.cb_metric.setCurrentIndex(idx if idx >= 0 else 0)
+            # aggregation 기본값
+            idx = self.cb_agg.findText(default_agg)
+            if idx >= 0:
+                self.cb_agg.setCurrentIndex(idx)
+        finally:
+            self.cb_metric.blockSignals(False)
+            self.cb_agg.blockSignals(False)
+
+    # shared mode일 때 부모가 넘겨주는 필터
+    def current_filters(self, shared_filter_values: Optional[List[Tuple[str, Optional[str]]]] = None
+                        ) -> List[Tuple[str, Optional[str]]]:
+        if self.shared_filters:
+            return shared_filter_values or []
+        # 독립 필터 모드
+        f = [
+            ("pod_name", combo_val(self.cb_pod_name)),
+            (self.ordinal_col, combo_val(self.cb_pod_ordinal)),
+            ("comm", combo_val(self.cb_comm)),
+            ("state", combo_val(self.cb_state)),
+        ]
+        return f
+
+    def current_metric(self) -> Optional[str]:
+        return self.cb_metric.currentText() if self.cb_metric.count() > 0 else None
+
+    def current_agg(self) -> str:
+        return self.cb_agg.currentText()
+
+    def y_limits(self) -> Tuple[Optional[float], Optional[float]]:
+        return to_float_or_none(self.le_ymin.text()), to_float_or_none(self.le_ymax.text())
+
+    def draw_series(self, s: pd.Series):
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        if s is not None and len(s) > 0:
+            x = s.index.values
+            y = s.values
+            ax.plot(x, y, marker="o")
+            ax.set_xlim(min(x), max(x))
+        else:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+
+        ymin, ymax = self.y_limits()
+        if ymin is not None or ymax is not None:
+            ax.set_ylim(bottom=ymin if ymin is not None else None,
+                        top=ymax if ymax is not None else None)
+
+        title_metric = self.current_metric() or ""
+        ax.set_title(f"[{self.title}] {self.current_agg()} {title_metric} by {GROUP_COL}")
+        ax.set_xlabel(GROUP_COL)
+        ax.set_ylabel("value")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        self.canvas.draw()
+
+
+# ---------------------------
+# 탭3: 멀티 시리즈 오버레이
+# ---------------------------
+class SeriesPanel(QWidget):
+    """ 오버레이용 단일 시리즈 설정 패널 (신호 연결은 부모가 담당) """
+    def __init__(self, title: str, df: pd.DataFrame, numeric_cols, parent=None):
+        super().__init__(parent)
+        self.df = df
+        self.numeric_cols = numeric_cols
+        self.ordinal_col = pick_ordinal_col(self.df)
+
+        box = QGroupBox(title)
+        lay = QVBoxLayout(box)
+
+        # 필터
+        filt = QHBoxLayout()
+        self.cb_pod_name = QComboBox(); init_combo(self.cb_pod_name, df, "pod_name")
+        filt.addWidget(QLabel("pod_name")); filt.addWidget(self.cb_pod_name)
+        self.cb_pod_ordinal = QComboBox(); init_combo(self.cb_pod_ordinal, df, self.ordinal_col)
+        filt.addWidget(QLabel(self.ordinal_col)); filt.addWidget(self.cb_pod_ordinal)
+        self.cb_comm = QComboBox(); init_combo(self.cb_comm, df, "comm")
+        filt.addWidget(QLabel("comm")); filt.addWidget(self.cb_comm)
+        self.cb_state = QComboBox(); init_combo(self.cb_state, df, "state")
+        filt.addWidget(QLabel("state")); filt.addWidget(self.cb_state)
+        lay.addLayout(filt)
+
+        # metric/agg
+        ctrl = QHBoxLayout()
+        self.cb_metric = QComboBox(); self.cb_metric.addItems(self.numeric_cols)
+        ctrl.addWidget(QLabel("Metric")); ctrl.addWidget(self.cb_metric)
+        self.cb_agg = QComboBox(); self.cb_agg.addItems(["Sum", "Mean"])
+        ctrl.addWidget(QLabel("Aggregation")); ctrl.addWidget(self.cb_agg)
+        ctrl.addStretch(1)
+        lay.addLayout(ctrl)
+
+        outer = QVBoxLayout(self)
+        outer.addWidget(box)
+
+    def filters(self):
+        return [
+            ("pod_name", combo_val(self.cb_pod_name)),
+            (self.ordinal_col, combo_val(self.cb_pod_ordinal)),
+            ("comm", combo_val(self.cb_comm)),
+            ("state", combo_val(self.cb_state)),
+        ]
+    def metric(self):
+        return self.cb_metric.currentText() if self.cb_metric.count() > 0 else None
+    def agg(self):
+        return self.cb_agg.currentText()
+
+
+# --- 교체용 OverlayTab (안전 초기화 + 지연 렌더링) ---
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QScrollArea, QGroupBox, QComboBox
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import pandas as pd
+
+# (유틸은 기존 코드 그대로 사용)
+# - select_numeric_metric_cols, pick_ordinal_col, init_combo, combo_val,
+#   apply_filters, aggregate_series, to_float_or_none
+# - SeriesPanel는 아래처럼 약간만 수정: 신호 연결은 부모에서 하고 redraw는 부모가 호출
+
+class SeriesPanel(QWidget):
+    def __init__(self, title: str, df: pd.DataFrame, numeric_cols, parent=None):
+        super().__init__(parent)
+        self.df = df
+        self.numeric_cols = numeric_cols
+        self.ordinal_col = pick_ordinal_col(self.df)
+
+        self.on_delete = None  # ← 부모(OverlayTab)가 할당할 콜백
+
+        box = QGroupBox(title)
+        self._box = box  # 제목 갱신용
+
+        lay = QVBoxLayout(box)
+
+        # 상단 행: (필터 레이블들) + 우측에 삭제 버튼
+        top_row = QHBoxLayout()
+
+        # 필터 영역
+        self.cb_pod_name = QComboBox(); init_combo(self.cb_pod_name, df, "pod_name")
+        top_row.addWidget(QLabel("pod_name")); top_row.addWidget(self.cb_pod_name)
+
+        self.cb_pod_ordinal = QComboBox(); init_combo(self.cb_pod_ordinal, df, self.ordinal_col)
+        top_row.addWidget(QLabel(self.ordinal_col)); top_row.addWidget(self.cb_pod_ordinal)
+
+        self.cb_comm = QComboBox(); init_combo(self.cb_comm, df, "comm")
+        top_row.addWidget(QLabel("comm")); top_row.addWidget(self.cb_comm)
+
+        self.cb_state = QComboBox(); init_combo(self.cb_state, df, "state")
+        top_row.addWidget(QLabel("state")); top_row.addWidget(self.cb_state)
+
+        # 오른쪽 끝: 삭제 버튼
+        top_row.addStretch(1)
+        self.btn_delete = QPushButton("삭제")
+        self.btn_delete.setFixedWidth(64)
+        self.btn_delete.clicked.connect(self._handle_delete)
+        top_row.addWidget(self.btn_delete)
+
+        lay.addLayout(top_row)
+
+        # metric/agg 행
+        ctrl = QHBoxLayout()
+        self.cb_metric = QComboBox(); self.cb_metric.addItems(self.numeric_cols)
+        ctrl.addWidget(QLabel("Metric")); ctrl.addWidget(self.cb_metric)
+        self.cb_agg = QComboBox(); self.cb_agg.addItems(["Sum", "Mean"])
+        ctrl.addWidget(QLabel("Aggregation")); ctrl.addWidget(self.cb_agg)
+        ctrl.addStretch(1)
+        lay.addLayout(ctrl)
+
+        outer = QVBoxLayout(self)
+        outer.addWidget(box)
+
+    def set_title(self, title: str):
+        self._box.setTitle(title)
+
+    def _handle_delete(self):
+        if callable(self.on_delete):
+            self.on_delete(self)  # 부모에 자신을 넘겨서 삭제 요청
+
+    def set_defaults(self, default_metric: str = "utime_delta", default_agg: str = "Mean"):
+        # 신호 일시 차단
+        self.cb_metric.blockSignals(True)
+        self.cb_agg.blockSignals(True)
+        try:
+            # metric 기본값
+            if self.cb_metric.count() > 0:
+                idx = self.cb_metric.findText(default_metric)
+                self.cb_metric.setCurrentIndex(idx if idx >= 0 else 0)
+            # aggregation 기본값
+            idx = self.cb_agg.findText(default_agg)
+            if idx >= 0:
+                self.cb_agg.setCurrentIndex(idx)
+        finally:
+            self.cb_metric.blockSignals(False)
+            self.cb_agg.blockSignals(False)
+
+    def current_filter_values(self):
+        """라벨용: 현재 콤보 선택값을 그대로 반환(None이면 All로 표시 예정)"""
+        return {
+            "pod_name": combo_val(self.cb_pod_name),
+            "pod_ordinal": combo_val(self.cb_pod_ordinal),  # or ordinary 내부적으로 이미 처리됨
+            "comm": combo_val(self.cb_comm),
+            "state": combo_val(self.cb_state),
+        }
+
+    def filters(self):
+        return [
+            ("pod_name", combo_val(self.cb_pod_name)),
+            (self.ordinal_col, combo_val(self.cb_pod_ordinal)),
+            ("comm", combo_val(self.cb_comm)),
+            ("state", combo_val(self.cb_state)),
+        ]
+    def metric(self): return self.cb_metric.currentText() if self.cb_metric.count()>0 else None
+    def agg(self):    return self.cb_agg.currentText()
+
+class OverlayTab(QWidget):
+    """ 멀티 시리즈 오버레이 탭 (Series 영역 고정, 그래프 영역 가변) """
+    def __init__(self, df: pd.DataFrame, numeric_cols, parent=None):
+        super().__init__(parent)
+        self.df = df
+        self.numeric_cols = numeric_cols
+        self.series_panels = []
+        self._ready = False
+        self._child_windows = []
+
+        root = QVBoxLayout(self)
+
+        # 상단: 버튼 + Y범위
+        top = QHBoxLayout()
+        self.btn_add = QPushButton("+ Add series")
+        self.btn_add.clicked.connect(self._add_series_and_draw)
+        top.addWidget(self.btn_add)
+
+        # 새창 버튼 추가
+        self.btn_popup = QPushButton("Open in new window")
+        self.btn_popup.clicked.connect(self._open_detached_window)
+        top.addWidget(self.btn_popup)
+
+        top.addSpacing(12)
+        top.addWidget(QLabel("Y min"))
+        self.le_ymin = QLineEdit(); self.le_ymin.setFixedWidth(90)
+        top.addWidget(self.le_ymin)
+        top.addWidget(QLabel("Y max"))
+        self.le_ymax = QLineEdit(); self.le_ymax.setFixedWidth(90)
+        top.addWidget(self.le_ymax)
+        top.addStretch(1)
+        root.addLayout(top)
+
+        # --- Series 영역(스크롤) : 높이 고정 200 ---
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFixedHeight(200)                     # ★ 고정 높이
+        self.scroll.setSizePolicy(QSizePolicy.Expanding,    # 가로는 확장
+                                  QSizePolicy.Fixed)        # 세로는 고정
+
+        self.inner = QWidget()
+        self.inner_layout = QVBoxLayout(self.inner)
+        self.inner_layout.setAlignment(Qt.AlignTop)
+        self.scroll.setWidget(self.inner)
+
+        # --- 그래프 영역 : 창 크기에 따라 확장 ---
+        self.fig = Figure(figsize=(6, 3.5))
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # ★ 확장
+        # stretch 설정: scroll(0), canvas(1)
+        root.addWidget(self.scroll, stretch=0)
+        root.addWidget(self.canvas, stretch=1)
+
+        # 입력 이벤트(준비 완료 후 반영)
+        self.le_ymin.editingFinished.connect(self._safe_redraw)
+        self.le_ymax.editingFinished.connect(self._safe_redraw)
+
+        # 기본 시리즈는 지연 초기화로 추가
+        QTimer.singleShot(0, self._post_init)
+
+    def _open_detached_window(self):
+        win = OverlayWindow(self.df, self.numeric_cols)
+        self._child_windows.append(win)  # 참조 유지
+        win.show()
+        center_on_primary(win)
+
+    def _post_init(self):
+        # 초기 기본 2개 시리즈 추가 (이 시점에서도 redraw는 마지막에 한 번)
+        self._add_series(connect_signals=True, do_redraw=False)
+        self._add_series(connect_signals=True, do_redraw=False)
+        self._ready = True
+        self.redraw()
+
+    def _safe_redraw(self):
+        if self._ready:
+            self.redraw()
+
+    def _wire_panel_signals(self, panel: SeriesPanel):
+        # 변경: 삭제 콜백 연결
+        panel.on_delete = self.remove_series
+
+        # 기존 필터/메트릭 변경 시그널
+        panel.cb_pod_name.currentIndexChanged.connect(self._safe_redraw)
+        panel.cb_pod_ordinal.currentIndexChanged.connect(self._safe_redraw)
+        panel.cb_comm.currentIndexChanged.connect(self._safe_redraw)
+        panel.cb_state.currentIndexChanged.connect(self._safe_redraw)
+        panel.cb_metric.currentIndexChanged.connect(self._safe_redraw)
+        panel.cb_agg.currentIndexChanged.connect(self._safe_redraw)
+
+    def _add_series(self, connect_signals=True, do_redraw=True):
+        idx = len(self.series_panels) + 1
+        panel = SeriesPanel(f"Series {idx}", self.df, self.numeric_cols)
+        panel.set_defaults("utime_delta", "Mean")
+        if connect_signals:
+            self._wire_panel_signals(panel)
+
+        self.series_panels.append(panel)
+        self.inner_layout.addWidget(panel)
+
+        if do_redraw and self._ready:
+            self.redraw()
+
+    def remove_series(self, panel: SeriesPanel):
+        """SeriesPanel '삭제' 버튼 콜백에서 호출됨"""
+        # 1) 목록에서 제거
+        try:
+            self.series_panels.remove(panel)
+        except ValueError:
+            pass
+
+        # 2) 레이아웃에서 제거 후 위젯 삭제
+        self.inner_layout.removeWidget(panel)
+        panel.setParent(None)
+        panel.deleteLater()
+
+        # 3) 남은 패널들 제목 재번호
+        for i, p in enumerate(self.series_panels, start=1):
+            p.set_title(f"Series {i}")
+
+        # 4) 다시 그리기
+        if self._ready:
+            self.redraw()
+
+    def _add_series_and_draw(self):
+        self._add_series(connect_signals=True, do_redraw=True)
+
+    @staticmethod
+    def _fmt_val(v):
+        """None -> 'All' 로 치환"""
+        return "All" if v is None else str(v)
+
+    def _series_label(self, idx: int, sp: SeriesPanel, metric: str) -> str:
+        fv = sp.current_filter_values()
+        # 라벨 구성: S{n}: {Agg} {Metric} | pod_name=..., pod_ordinal=..., comm=..., state=...
+        return (
+            f"S{idx}: {sp.agg()} {metric} | "
+            f"pod_name={self._fmt_val(fv.get('pod_name'))}, "
+            f"pod_ordinal={self._fmt_val(fv.get('pod_ordinal'))}, "
+            f"comm={self._fmt_val(fv.get('comm'))}, "
+            f"state={self._fmt_val(fv.get('state'))}"
+        )
+
+    def redraw(self):
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+
+        any_data = False
+        for i, sp in enumerate(self.series_panels, start=1):
+            metric = sp.metric()
+            if not metric:
+                continue
+
+            sub = apply_filters(self.df, sp.filters())
+            s = aggregate_series(sub, metric, sp.agg())
+            if s is None or len(s) == 0:
+                continue
+
+            any_data = True
+            label = self._series_label(i, sp, metric)  # ★ 라벨 생성
+            ax.plot(s.index.values, s.values, marker="o", label=label)
+
+        if not any_data:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        else:
+            ax.legend(loc="best")
+
+        # Y축 범위 처리 (기존 그대로)
+        ymin = to_float_or_none(self.le_ymin.text())
+        ymax = to_float_or_none(self.le_ymax.text())
+        if ymin is not None or ymax is not None:
+            ax.set_ylim(bottom=ymin if ymin is not None else None,
+                        top=ymax if ymax is not None else None)
+
+        ax.set_title("Overlay: multiple series by cycle_id")
+        ax.set_xlabel("cycle_id")
+        ax.set_ylabel("value")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        self.canvas.draw()
+
+class OverlayWindow(QWidget):
+    """OverlayTab을 독립 윈도우로 띄우는 컨테이너"""
+    def __init__(self, df, numeric_cols, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Overlay (Detached)")
+        lay = QVBoxLayout(self)
+        # 기존 OverlayTab 재사용
+        self.overlay = OverlayTab(df, numeric_cols)
+        lay.addWidget(self.overlay)
+        self.resize(900, 600)
+
+# ---------------------------
+# 메인 윈도우 (탭 구성)
+# ---------------------------
+class CyclePlotterApp(QWidget):
+    """
+    Tab1: 공통 필터 + 좌/우 템플릿(각 템플릿 metric/agg만 독립)
+    Tab2: 좌/우 템플릿 독립 필터 + metric/agg
+    Tab3: 멀티 시리즈 오버레이(Series 추가 가능)
+    모든 그래프에 Y축 min/max 설정 제공
+    """
+    def __init__(self, df: pd.DataFrame, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Cycle-based Usage Plotter (3 Tabs)")
+        self.resize(1500, 900)
+
+        self.df = prepare_df_base(df)
+        self.numeric_cols = select_numeric_metric_cols(self.df)
+
+        root = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs)
+
+        # ---------- Tab 1 ----------
+        self.tab3 = OverlayTab(self.df, self.numeric_cols)
+        self.tabs.addTab(self.tab3, "Tab 1: Overlay (multi-series)")
+
+        # ---------- Tab 2 ----------
+        tab1 = QWidget(); l1 = QVBoxLayout(tab1)
+
+        # 공통 필터
+        filt_row = QHBoxLayout()
+        self.cb1_pod_name = QComboBox(); init_combo(self.cb1_pod_name, self.df, "pod_name")
+        self.cb1_ord_col = pick_ordinal_col(self.df)
+        self.cb1_pod_ordinal = QComboBox(); init_combo(self.cb1_pod_ordinal, self.df, self.cb1_ord_col)
+        self.cb1_comm = QComboBox(); init_combo(self.cb1_comm, self.df, "comm")
+        self.cb1_state = QComboBox(); init_combo(self.cb1_state, self.df, "state")
+        for lab, w in [("pod_name", self.cb1_pod_name), (self.cb1_ord_col, self.cb1_pod_ordinal),
+                       ("comm", self.cb1_comm), ("state", self.cb1_state)]:
+            filt_row.addWidget(QLabel(lab)); filt_row.addWidget(w)
+        filt_row.addStretch(1)
+        l1.addLayout(filt_row)
+
+        # 좌우 패널
+        panels_row1 = QHBoxLayout()
+        self.panel1_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=True)
+        self.panel1_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=True)
+        self.panel1_a.set_defaults("utime_delta", "Mean")
+        self.panel1_b.set_defaults("utime_delta", "Mean")
+        self.panel1_a.on_redraw = self.refresh_tab1
+        self.panel1_b.on_redraw = self.refresh_tab1
+
+        sep1 = QFrame(); sep1.setFrameShape(QFrame.VLine); sep1.setFrameShadow(QFrame.Sunken)
+        panels_row1.addWidget(self.panel1_a, stretch=1)
+        panels_row1.addWidget(sep1)
+        panels_row1.addWidget(self.panel1_b, stretch=1)
+        l1.addLayout(panels_row1)
+
+        # 필터 시그널
+        for cb in (self.cb1_pod_name, self.cb1_pod_ordinal, self.cb1_comm, self.cb1_state):
+            cb.currentIndexChanged.connect(self.refresh_tab1)
+
+        self.tabs.addTab(tab1, "Tab 2: Shared filters")
+
+        # ---------- Tab 3 ----------
+        tab2 = QWidget(); l2 = QVBoxLayout(tab2)
+        panels_row2 = QHBoxLayout()
+        self.panel2_a = TemplatePanel("Template A", self.df, self.numeric_cols, shared_filters=False)
+        self.panel2_b = TemplatePanel("Template B", self.df, self.numeric_cols, shared_filters=False)
+        self.panel2_a.set_defaults("utime_delta", "Mean")
+        self.panel2_b.set_defaults("utime_delta", "Mean")
+        self.panel2_a.on_redraw = self.refresh_tab2
+        self.panel2_b.on_redraw = self.refresh_tab2
+
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.VLine); sep2.setFrameShadow(QFrame.Sunken)
+        panels_row2.addWidget(self.panel2_a, stretch=1)
+        panels_row2.addWidget(sep2)
+        panels_row2.addWidget(self.panel2_b, stretch=1)
+        l2.addLayout(panels_row2)
+
+        self.tabs.addTab(tab2, "Tab 3: Independent filters per template")
+
+
+
+        # 초기 렌더
+        self.refresh_tab1()
+        self.refresh_tab2()
+        self.tab3.redraw()
+
+    # -------- Tab1 --------
+    def _tab1_shared_filters(self) -> List[Tuple[str, Optional[str]]]:
+        return [
+            ("pod_name", combo_val(self.cb1_pod_name)),
+            (self.cb1_ord_col, combo_val(self.cb1_pod_ordinal)),
+            ("comm", combo_val(self.cb1_comm)),
+            ("state", combo_val(self.cb1_state)),
+        ]
+
+    def refresh_tab1(self, *_):
+        shared = self._tab1_shared_filters()
+
+        # Panel A
+        metric_a = self.panel1_a.current_metric()
+        if metric_a:
+            sub_a = apply_filters(self.df, shared)
+            sA = aggregate_series(sub_a, metric_a, self.panel1_a.current_agg())
+        else:
+            sA = pd.Series(dtype="float64")
+        self.panel1_a.draw_series(sA)
+
+        # Panel B
+        metric_b = self.panel1_b.current_metric()
+        if metric_b:
+            sub_b = apply_filters(self.df, shared)
+            sB = aggregate_series(sub_b, metric_b, self.panel1_b.current_agg())
+        else:
+            sB = pd.Series(dtype="float64")
+        self.panel1_b.draw_series(sB)
+
+    # -------- Tab2 --------
+    def refresh_tab2(self, *_):
+        # Panel A
+        filt_a = self.panel2_a.current_filters()
+        metric_a = self.panel2_a.current_metric()
+        if metric_a:
+            sub_a = apply_filters(self.df, filt_a)
+            sA = aggregate_series(sub_a, metric_a, self.panel2_a.current_agg())
+        else:
+            sA = pd.Series(dtype="float64")
+        self.panel2_a.draw_series(sA)
+
+        # Panel B
+        filt_b = self.panel2_b.current_filters()
+        metric_b = self.panel2_b.current_metric()
+        if metric_b:
+            sub_b = apply_filters(self.df, filt_b)
+            sB = aggregate_series(sub_b, metric_b, self.panel2_b.current_agg())
+        else:
+            sB = pd.Series(dtype="float64")
+        self.panel2_b.draw_series(sB)
+
+
+# ----------------------------
+# main: 외부에서 DataFrame을 주입해서 실행
+# ----------------------------
+def center_on_primary(win):
+    """메인 모니터(Primary) 가용 영역의 정중앙에 윈도우를 위치시킵니다."""
+    screen = QGuiApplication.primaryScreen()
+    geo = screen.availableGeometry()     # 작업 표시줄 제외 영역
+    # frameGeometry는 show() 이후에 제대로 계산됨
+    fg = win.frameGeometry()
+    fg.moveCenter(geo.center())
+    win.move(fg.topLeft())
+
+def main(df):
+    # 이미 QApplication이 있으면 재사용
+    app = QApplication.instance()
+    if app is None:
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        app = QApplication(sys.argv)
+
+    w = CyclePlotterApp(df)   # 당신이 만든 최상위 위젯
+    w.resize(1280, 720)
+    w.show()
+    center_on_primary(w)
+
+    sys.exit(app.exec_())
