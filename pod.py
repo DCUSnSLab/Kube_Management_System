@@ -1,3 +1,5 @@
+import csv
+
 from process import Process, Mode_State, Policy_State
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from historyManager import HistoryManager
@@ -23,10 +25,24 @@ class Pod():
         self.pod = pod
         self.pod_name = pod.metadata.name
         self.namespace = pod.metadata.namespace
-        self.check_history_result = None
+
         self.processes = list()
         self.pod_status = None  # list -> obj
         self.pod_lifecycle = None  # list -> obj
+        self.hm = HistoryManager(self.api, self.pod)
+        self.pm = ProcessManager(self.api, self.pod)
+
+        # 분석 결과 (커맨드 히스토리, 프로세스)
+        self.result_command_history: bool = None
+        self.result_process: bool = None
+        self.reason_process: str = None
+
+    def test(self):
+        if self.result_command_history==None:
+            self.result_command_history = False
+        else:
+            print(self.result_command_history)
+
 
     def get_Timestamp(self):
         """시간대를 UTC로 통일"""
@@ -92,28 +108,33 @@ class Pod():
         if self.pod_lifecycle is None:
             self.pod_lifecycle = Pod_Lifecycle()
         """When pod deleted, save time and because of pod deleted"""
-        self.pod_lifecycle.reason_deletion = Reason_Deletion[reason].value
+        self.pod_lifecycle.reason_deletion = reason
         self.pod_lifecycle.deleteTime = self.get_Timestamp()
 
     def save_DeleteReason_to_DB(self):
         """Delete time and reason save to DB"""
         save_delete_reason(self.pod_name, self.namespace, self.pod_lifecycle)
 
-    def getResultHistory(self):
+    def getPodCommandHistory(self):
         """run에서 검사 결과 값을 가져오고, gc로 결과 전달"""
-        ch = HistoryManager(self.api, self.pod)
-        lastTime_Bash_history=ch.getLastUseTime()
-        self.check_history_result = ch.run(lastTime_Bash_history)
-        print(self.check_history_result)
+        lastTime_Bash_history=self.hm.getLastUseTime()
+        result = self.hm.analyze(lastTime_Bash_history)
+        print(result)
 
         # pod_lifecycle에 리스토리 검사 결과 저장
-        save_bash_history_result(self.pod_name, self.namespace, self.check_history_result)
+        save_bash_history_result(self.pod_name, self.namespace, result)
 
         if lastTime_Bash_history is not None:
-            lastTimeStamp_Bash_history = ch.checkTimestamp(lastTime_Bash_history)
+            lastTimeStamp_Bash_history = self.hm.checkTimestamp(lastTime_Bash_history)
             self.saveBash_history_to_DB(lastTimeStamp_Bash_history)
 
-        return self.check_history_result
+        # 7일이상 사용하지않으면 false 반환
+        if not result and self.checkCreateTime():
+            self.result_command_history = False
+        else:
+            self.result_command_history = True
+        
+        return self.result_command_history
 
     def saveBash_history_to_DB(self, last_modified_time):
         """Save bash history data to DB"""
@@ -138,100 +159,22 @@ class Pod():
         result = (now - creation_time) > timedelta(days=7)
         return result
 
-    def getResultProcess(self):
-        """process 데이터로 판별하기 위한 함수 (미완)"""
-        #/proc/[pid]/stat 값을 가져오거나 ps 명령어를 활용
-        # cp = CheckProcess(self.api, self.pod)
-        # cpResult = cp.run()
-        # print(cpResult)
-        # return cpResult
-        pass
+    def getPodProcessStatus(self, experiment_id):
+        """
+        프로세스를 가져와서 분석한 결과값을 가져오는 역할
+        """
+        processData = self.pm.getPorcessData()
+        self.processes = processData['processes']
+        cgroups = processData['cgroups']
+        timestamp = self.get_Timestamp()
 
-    def resetProcessList(self):
-        self.processes = []
-
-    def insertProcessData(self):
-        """get /proc/stat data amd split into 52"""
-        self.resetProcessList()
-
-        cp = ProcessManager(self.api, self.pod)
-        process_data = cp.getProcStat()
-        # 명령어의 결과값이 None일 경우 건너뛰도록
-        if process_data is None:
-            print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
-            return
-
-        for line in process_data.splitlines():
-            fields = line.split()
-            if len(fields) < 2:  # 최소 2개의 필드가 있어야 함
-                continue
-
-            p = Process()
-
-            # Map fields to Process attributes
-            try:
-                p.pid = int(fields[0])
-            except ValueError:
-                print(f"Skipping invalid PID in line: {line}")
-                continue
-            p.comm = fields[1].strip('()')
-            try:  # for undefined code
-                p.state = Mode_State[fields[2]].value
-            except KeyError:
-                p.state = f"Unknown({fields[2]})"
-            p.ppid = int(fields[3])
-            p.pgrp = int(fields[4])
-            p.session = int(fields[5])
-            p.tty_nr = int(fields[6])
-            p.tpgid = int(fields[7])
-            p.flags = int(fields[8])
-            p.minflt = int(fields[9])
-            p.cminflt = int(fields[10])
-            p.majflt = int(fields[11])
-            p.cmajflt = int(fields[12])
-            p.utime = int(fields[13])
-            p.stime = int(fields[14])
-            p.cutime = int(fields[15])
-            p.cstime = int(fields[16])
-            p.priority = int(fields[17])
-            p.nice = int(fields[18])
-            p.num_threads = int(fields[19])
-            p.itrealvalue = int(fields[20])
-            p.starttime = int(fields[21])
-            p.vsize = int(fields[22])
-            p.rss = int(fields[23])
-            p.rsslim = int(fields[24])
-            p.startcode = int(fields[25])
-            p.endcode = int(fields[26])
-            p.startstack = int(fields[27])
-            p.kstkesp = int(fields[28])
-            p.kstkeip = int(fields[29])
-            p.signal = int(fields[30])
-            p.blocked = int(fields[31])
-            p.sigignore = int(fields[32])
-            p.sigcatch = int(fields[33])
-            p.wchan = int(fields[34])
-            p.nswap = int(fields[35])
-            p.cnswap = int(fields[36])
-            p.exit_signal = int(fields[37])
-            p.processor = int(fields[38])
-            p.rt_priority = int(fields[39])
-            p.policy = Policy_State(int(fields[40])).name
-            p.delayacct_blkio_ticks = int(fields[41])
-            p.guest_time = int(fields[42])
-            p.cguest_time = int(fields[43])
-            p.start_data = int(fields[44])
-            p.end_data = int(fields[45])
-            p.start_brk = int(fields[46])
-            p.arg_start = int(fields[47])
-            p.arg_end = int(fields[48])
-            p.env_start = int(fields[49])
-            p.env_end = int(fields[50])
-            p.exit_code = int(fields[51])
-
-            self.processes.append(p)
-
-        # self.printProcList()
+        self.result_process, self.reason_process, classification, summary = self.pm.analyzePodProcess(self.processes)
+        # print("pod status: ", self.result_process)
+        # print("reason process: ", self.reason_process)
+        self.saveStatDataToCSV(timestamp, experiment_id)
+        self.saveCgroupMetricsToCSV(cgroups, timestamp, experiment_id)
+        self.saveClassificationToCsv(classification, self.pod_name, experiment_id)
+        self.saveSummaryToCsv(summary, self.pod_name, experiment_id)
 
     def printProcList(self):
         print('-'*50)
@@ -239,24 +182,26 @@ class Pod():
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
         print('-' * 50)
 
-    def saveDataToCSV(self):
-        """Save process data in csv file"""
-        log_path = "/home/squirtle/Kube_Management_System/logging"
-        date = datetime.now().strftime("%Y-%m-%d")
-        date_dir = os.path.join(log_path, date)
-        os.makedirs(date_dir, exist_ok=True)
+    def saveStatDataToCSV(self, timestamp, experiment_id=None):
+        """
+        Save process data in csv file
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
 
-        file_name = os.path.join(date_dir, f"{self.pod_name}.csv")
+        file_name = os.path.join(log_dir, f"process_metrics_experiment{experiment_id}.csv")
 
         headers = [
-            "timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
+            "pod_name","timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
             "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime",
             "priority", "nice", "num_threads", "itrealvalue", "starttime", "vsize", "rss",
             "rsslim", "startcode", "endcode", "startstack", "kstkesp", "kstkeip", "signal",
             "blocked", "sigignore", "sigcatch", "wchan", "nswap", "cnswap", "exit_signal",
             "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
             "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end",
-            "env_start", "env_end", "exit_code"
+            "env_start", "env_end", "exit_code",
+            "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches",
+            "vm_rss_status", "read_bytes", "write_bytes"
         ]
         file_exists = os.path.exists(file_name)
 
@@ -264,10 +209,9 @@ class Pod():
             if not file_exists:
                 file.write(",".join(headers) + "\n")  # 헤더 추가
 
-            timestamp = self.get_Timestamp()
-
             for process in self.processes:
-                field_values = [
+                stat_values = [
+                    self.pod_name,
                     timestamp,
                     str(process.pid), process.comm, process.state, str(process.ppid),
                     str(process.pgrp), str(process.session), str(process.tty_nr),
@@ -288,8 +232,53 @@ class Pod():
                     str(process.arg_end), str(process.env_start), str(process.env_end),
                     str(process.exit_code)
                 ]
-                file.write(",".join(field_values) + "\n")
+
+                # metrics 값 (없으면 빈칸)
+                if process.metrics:
+                    metrics_values = [
+                        str(process.metrics.voluntary_ctxt_switches or ""),
+                        str(process.metrics.nonvoluntary_ctxt_switches or ""),
+                        str(process.metrics.vm_rss or ""),
+                        str(process.metrics.read_bytes or ""),
+                        str(process.metrics.write_bytes or "")
+                    ]
+                else:
+                    metrics_values = ["", "", "", "", ""]
+                file.write(",".join([str(v) for v in (stat_values + metrics_values)]) + "\n")
+
             file.write("\n")
+
+    def saveCgroupMetricsToCSV(self, cgroup, timestamp, experiment_id=None):
+        """
+        Save cgroup metrics (memory, I/O) into CSV file
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(log_dir, exist_ok=True)
+
+        file_name = os.path.join(log_dir, f"cgroup_experiment{experiment_id}.csv")
+
+        headers = [
+            "pod_name", "timestamp",
+            "memory_current", "memory_limit",
+            "io_read_bytes", "io_write_bytes"
+        ]
+
+        file_exists = os.path.exists(file_name)
+
+        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            if not file_exists:
+                file.write(",".join(headers) + "\n")
+
+            row = [
+                self.pod_name,
+                timestamp,
+                str(cgroup.memory_current or ""),
+                str(cgroup.memory_limit or ""),
+                str(cgroup.io_read_bytes or ""),
+                str(cgroup.io_write_bytes or "")
+            ]
+
+            file.write(",".join(row) + "\n")
 
     def saveProcessDataToDB(self):
         """Save Pod's process data to DB"""
@@ -354,3 +343,85 @@ class Pod():
             })
 
         save_to_process(self.pod_name, self.namespace, processes)
+
+    def saveClassificationToCsv(self, classification, pod_name, experiment_id=None):
+        """
+        분류한 딕셔너리와 분류 결과 요약한 딕셔너리를 csv로 저장
+        classification: 프로세스별 분석 결과
+        summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+
+        filename = os.path.join(log_dir, f"process_classification_experiment{experiment_id}.csv")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+        if not classification:
+            return
+
+        for proc in classification:
+            proc["pod_name"] = pod_name
+            proc["timestamp"] = timestamp
+
+        file_exists = os.path.isfile(filename)
+        keys = classification[0].keys()
+
+        with open(filename, "a", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=keys)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerows(classification)
+
+        print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
+
+    def saveSummaryToCsv(self, summary, pod_name, experiment_id=None):
+        """
+        모든 파드 summary 결과를 하나의 CSV에 누적 저장
+        """
+        log_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+
+        filename = os.path.join(log_dir, f"process_summary_experiment{experiment_id}.csv")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if not summary:
+            return
+
+        row = {"pod_name": pod_name, "timestamp": timestamp}
+        row.update(summary)
+
+        file_exists = os.path.isfile(filename)
+        keys = row.keys()
+
+        with open(filename, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=keys)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+
+        print(f"[SAVE - summary] Appended summary for {pod_name} to {filename}")
+
+    def shouldGarbageCollection(self):
+        """
+        pod가 가비지 컬렉션에 의해 삭제되어야 하는지 판단
+        프로세스 분석 결과와 명령어 히스토리 결과를 확인
+
+        return:
+            - GC 여부: bool
+            - 이유: str
+            - 종류(hisotry or process): str
+        """
+        # 1. 명령어 히스토리 기반 분석
+        self.getPodCommandHistory()
+
+        # 2. 먼저 프로세스 기반 분석
+        self.getPodProcessStatus()
+
+        # 3. 판단
+        if not self.result_command_history:
+            return True, 'No usage history for more than a week', 'history'
+        elif self.result_process:
+            return True, self.reason_process, 'process'
+        else:
+            return False, None, 'active'

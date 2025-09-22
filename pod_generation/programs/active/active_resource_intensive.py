@@ -66,15 +66,15 @@ def main():
     resource_manager = ResourceIntensive()
     cycle = 0
     memory_allocated = 0
-    max_memory = 100  # 최대 100MB
+    max_memory = 80  # 최대 80MB
     
     while True:
         cycle += 1
         
         # 메모리 할당 (점진적)
-        if memory_allocated < max_memory and cycle % 5 == 0:
-            if resource_manager.allocate_memory(5):  # 5MB씩 할당
-                memory_allocated += 5
+        if memory_allocated < max_memory and cycle % 8 == 0:
+            if resource_manager.allocate_memory(4):  # 4MB씩 할당
+                memory_allocated += 4
                 print(f"[ACTIVE] Memory allocated: {memory_allocated}MB / {max_memory}MB", flush=True)
         
         # CPU 작업
