@@ -638,6 +638,192 @@ class OverlayWindow(QWidget):
         lay.addWidget(self.overlay)
         self.resize(900, 600)
 
+class CommStateGrid(QWidget):
+    """
+    지정 comm(정확 일치, strip+lower) 각각에 대해
+    선택 metric을 state(running/sleep)로 분리하여 cycle_id별 시계열로 그리는 그리드.
+
+    추가 타일:
+      [0] active_* (avg)  — comm이 'active'로 시작하는 모든 행의 평균
+      [1] bg_* (avg)      — comm이 'bg'     로 시작하는 모든 행의 평균
+
+    - 상단 컨트롤: Metric, Aggregation(Sum/Mean: 개별 comm에만 적용), Y-min/max
+    - 창 크기 변화에 따라 열 수 동적 조절
+    """
+    def __init__(self, df: pd.DataFrame, comm_list: list[str], numeric_cols: list[str], parent=None):
+        super().__init__(parent)
+        self.df = prepare_df_base(df).copy()
+        if "comm" not in self.df.columns:
+            raise KeyError("CommStateGrid: 데이터에 'comm' 컬럼이 없습니다.")
+        if GROUP_COL not in self.df.columns:
+            raise KeyError(f"CommStateGrid: 데이터에 '{GROUP_COL}' 컬럼이 없습니다.")
+
+        # 정규화 컬럼
+        self.df["__comm_norm__"] = self.df["comm"].astype(str).str.strip().str.lower()
+        self.comm_keys = [c.strip().lower() for c in comm_list]
+        self.prefix_avgs = [("active", "active_* (avg)"), ("bg", "bg_* (avg)")]
+
+        # 상단 컨트롤
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Metric"))
+        self.cb_metric = QComboBox(); self.cb_metric.addItems(numeric_cols)
+        if "utime_delta" in numeric_cols: self.cb_metric.setCurrentText("utime_delta")
+        top.addWidget(self.cb_metric)
+
+        top.addSpacing(12)
+        top.addWidget(QLabel("Aggregation"))
+        self.cb_agg = QComboBox(); self.cb_agg.addItems(["Sum", "Mean"]); self.cb_agg.setCurrentText("Mean")
+        top.addWidget(self.cb_agg)
+
+        top.addSpacing(12)
+        top.addWidget(QLabel("Y min")); self.le_ymin = QLineEdit(); self.le_ymin.setFixedWidth(90); top.addWidget(self.le_ymin)
+        top.addWidget(QLabel("Y max")); self.le_ymax = QLineEdit(); self.le_ymax.setFixedWidth(90); top.addWidget(self.le_ymax)
+        top.addStretch(1)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(top)
+
+        self.fig = Figure(figsize=(12, 6))
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        lay.addWidget(self.canvas, stretch=1)
+
+        # 시그널
+        self.cb_metric.currentIndexChanged.connect(self._safe_redraw)
+        self.cb_agg.currentIndexChanged.connect(self._safe_redraw)
+        self.le_ymin.editingFinished.connect(self._safe_redraw)
+        self.le_ymax.editingFinished.connect(self._safe_redraw)
+
+        self._ready = True
+        self.redraw()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._safe_redraw()
+
+    @staticmethod
+    def _norm_state(x: str) -> str:
+        if x is None: return ""
+        s = str(x).strip().lower()
+        if s == "r" or "run" in s:   return "running"
+        if s == "s" or "sleep" in s: return "sleep"
+        return s
+
+    def _agg_name(self) -> str:
+        return self.cb_agg.currentText()
+
+    def _metric_name(self) -> Optional[str]:
+        return self.cb_metric.currentText() if self.cb_metric.count() > 0 else None
+
+    def _y_limits(self) -> tuple[Optional[float], Optional[float]]:
+        def f(x):
+            try:
+                x = x.strip(); return None if x == "" else float(x)
+            except Exception:
+                return None
+        return f(self.le_ymin.text()), f(self.le_ymax.text())
+
+    def _series_metric_exact(self, key: str, metric: str, how: str) -> tuple[pd.Series, pd.Series]:
+        d = self.df[self.df["__comm_norm__"] == key].copy()
+        if d.empty or metric not in d.columns: return pd.Series(dtype="float64"), pd.Series(dtype="float64")
+        d["state_norm"] = d["state"].map(self._norm_state)
+        gb = d.groupby([GROUP_COL, "state_norm"], as_index=True)[metric]
+        pv = (gb.sum() if how == "Sum" else gb.mean()).unstack(fill_value=0).sort_index()
+        s_run = pv["running"] if "running" in pv.columns else pd.Series(0, index=pv.index)
+        s_slp = pv["sleep"]   if "sleep"   in pv.columns else pd.Series(0, index=pv.index)
+        return s_run, s_slp
+
+    def _series_metric_prefix_avg(self, prefix: str, metric: str) -> tuple[pd.Series, pd.Series]:
+        """
+        prefix로 시작하는 모든 comm을 묶어 '평균(Mean)'으로 집계.
+        (요구사항 명시: 항상 평균)
+        """
+        d = self.df[self.df["__comm_norm__"].str.startswith(prefix)].copy()
+        if d.empty or metric not in d.columns: return pd.Series(dtype="float64"), pd.Series(dtype="float64")
+        d["state_norm"] = d["state"].map(self._norm_state)
+        # 우선 comm 단위로 cycle_id×state 평균을 구한 뒤, 그 평균들을 다시 평균
+        gb = d.groupby([ "__comm_norm__", GROUP_COL, "state_norm"], as_index=False)[metric].mean()
+        pv = (gb.pivot_table(index=GROUP_COL, columns="state_norm", values=metric, aggfunc="mean")
+                .fillna(0).sort_index())
+        s_run = pv["running"] if "running" in pv.columns else pd.Series(0, index=pv.index)
+        s_slp = pv["sleep"]   if "sleep"   in pv.columns else pd.Series(0, index=pv.index)
+        return s_run, s_slp
+
+    def _calc_cols(self, min_tile_px: int = 340, max_cols: int = 5) -> int:
+        w = max(1, self.width())
+        return max(1, min(max_cols, w // min_tile_px))
+
+    def _safe_redraw(self, *_):
+        if getattr(self, "_ready", False): self.redraw()
+
+    def _plot_pair(self, ax, s_run: pd.Series, s_slp: pd.Series, ylabel: str):
+        if len(s_run)==0 and len(s_slp)==0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            return
+        xmins, xmaxs = [], []
+        if len(s_run)>0:
+            ax.plot(s_run.index.values, s_run.values, marker="o", label="running")
+            xmins.append(s_run.index.min()); xmaxs.append(s_run.index.max())
+        if len(s_slp)>0:
+            ax.plot(s_slp.index.values, s_slp.values, marker="o", label="sleep")
+            xmins.append(s_slp.index.min()); xmaxs.append(s_slp.index.max())
+        if xmins and xmaxs: ax.set_xlim(min(xmins), max(xmaxs))
+        ax.set_xlabel(GROUP_COL); ax.set_ylabel(ylabel); ax.grid(True, linestyle="--", alpha=0.4)
+
+    def redraw(self):
+        metric = self._metric_name()
+        if not metric: return
+
+        # 타일 순서: [prefix 평균 2개] + [개별 comm 12개]
+        tiles = [("prefix", pfx, label) for pfx, label in self.prefix_avgs] + \
+                [("exact", key, key) for key in self.comm_keys]
+
+        n = len(tiles)
+        cols = max(1, min(self._calc_cols(), n))
+        rows = (n + cols - 1) // cols
+
+        self.fig.clear()
+        axes = self.fig.subplots(rows, cols, squeeze=False)
+        first_legend_ax = None
+
+        for i, (t, key, title) in enumerate(tiles):
+            r, c = divmod(i, cols)
+            ax = axes[r][c]
+
+            if t == "prefix":
+                s_run, s_slp = self._series_metric_prefix_avg(key, metric)   # 항상 평균
+                ylab = f"{metric} (Mean)"
+            else:
+                s_run, s_slp = self._series_metric_exact(key, metric, self._agg_name())
+                ylab = f"{metric} ({self._agg_name()})"
+
+            self._plot_pair(ax, s_run, s_slp, ylab)
+            ax.set_title(title)
+            if first_legend_ax is None: first_legend_ax = ax
+
+        # 남는 축 숨김
+        for j in range(n, rows*cols):
+            r, c = divmod(j, cols); axes[r][c].axis("off")
+
+        # 공통 Y-limit
+        ymin, ymax = self._y_limits()
+        if ymin is not None or ymax is not None:
+            for rr in range(rows):
+                for cc in range(cols):
+                    axes[rr][cc].set_ylim(bottom=ymin if ymin is not None else None,
+                                          top=ymax if ymax is not None else None)
+
+        if first_legend_ax is not None:
+            first_legend_ax.legend(loc="best")
+
+        self.fig.suptitle(
+            f"Comm × State by {GROUP_COL} — {metric}",
+            fontsize=11, y=0.98
+        )
+        self.fig.tight_layout(rect=[0, 0, 1, 0.96])
+        self.canvas.draw()
+
+
 # ---------------------------
 # 메인 윈도우 (탭 구성)
 # ---------------------------
@@ -737,7 +923,23 @@ class CyclePlotterApp(QWidget):
         #
         # # 초기 렌더
         # self.refresh_tab1()
-        # self.refresh_tab2()
+        # self.refresh_tab2()3
+
+        # ---------- Tab 2 (NEW): Comm x State grid ----------
+        comm_exact_list = [
+            "active_burst", "active_cpu_intensive", "active_io_intensive",
+            "active_memory_intensive", "active_multithreaded", "active_resource_intensive",
+            "bg_cpu_worker", "bg_memory_cache", "bg_network_service",
+            "running_continuous", "running_event_loop", "running_task_queue",
+        ]
+
+        self.tab_cs = CommStateGrid(
+            self.df,
+            comm_list=comm_exact_list,
+            numeric_cols=self.numeric_cols,  # ← metric 후보 전달!
+        )
+        self.tabs.addTab(self.tab_cs, "Tab 2: Comm-State grid")
+
         self.tab3.redraw()
 
     # -------- Tab1 --------
