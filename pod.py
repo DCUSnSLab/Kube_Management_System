@@ -17,7 +17,36 @@ from DB_postgresql import (
 )
 
 from datetime import datetime, timezone, timedelta
+# pod.py 맨 위 import 근처에 추가
+import threading
+from collections import defaultdict
 import os
+
+# 파일별 락 (동일 프로세스/스레드 간 보호)
+_FILE_LOCKS = defaultdict(threading.Lock)
+# 헤더 썼는지 빠르게 체크하기 위한 집합(프로세스 내 캐시)
+_HEADER_WRITTEN = set()
+_HEADER_WRITTEN_LOCK = threading.Lock()
+
+def _ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+def _with_file_lock(fname: str):
+    return _FILE_LOCKS[fname]
+
+def _need_write_header_once(fname: str) -> bool:
+    """
+    프로세스 내에서 헤더를 한 번만 쓰게 하는 보조.
+    파일이 없을 때만 헤더를 쓰되, 스레드 경쟁을 방지.
+    """
+    with _HEADER_WRITTEN_LOCK:
+        if fname in _HEADER_WRITTEN:
+            return False
+        # 디스크에서도 확인 (첫 작성자만 True)
+        need = not os.path.exists(fname)
+        # 바로 표시해 중복 진입 방지
+        _HEADER_WRITTEN.add(fname)
+        return need
 
 class Pod():
     def __init__(self, api, pod):
@@ -36,6 +65,29 @@ class Pod():
         self.result_command_history: bool = None
         self.result_process: bool = None
         self.reason_process: str = None
+
+        # Pod 클래스 내부(클래스 변수)로 두면 좋습니다.
+        self.PROCESS_HEADERS = [
+            "pod_name", "timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
+            "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime", "priority", "nice",
+            "num_threads", "itrealvalue", "starttime", "vsize", "rss", "rsslim", "startcode", "endcode",
+            "startstack", "kstkesp", "kstkeip", "signal", "blocked", "sigignore", "sigcatch", "wchan", "nswap",
+            "cnswap", "exit_signal", "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
+            "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end", "env_start", "env_end",
+            "exit_code", "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches", "vm_rss_status",
+            "read_bytes", "write_bytes"
+        ]
+
+        self.CGROUP_HEADERS = [
+            "pod_name", "timestamp", "memory_current", "memory_limit", "io_read_bytes", "io_write_bytes"
+        ]
+
+        self.CLASSIFICATION_KEYS_ORDER = [
+            "pod_name", "timestamp", "pid", "comm", "role", "state", "score", "reason"
+        ]
+        self.SUMMARY_KEYS_ORDER = [
+            "pod_name", "timestamp", "active_cnt", "idle_cnt", "running_cnt", "bg_active_cnt", "note"
+        ]
 
     def test(self):
         if self.result_command_history==None:
@@ -171,6 +223,7 @@ class Pod():
         self.result_process, self.reason_process, classification, summary = self.pm.analyzePodProcess(self.processes)
         # print("pod status: ", self.result_process)
         # print("reason process: ", self.reason_process)
+
         self.saveStatDataToCSV(timestamp, experiment_id)
         self.saveCgroupMetricsToCSV(cgroups, timestamp, experiment_id)
         self.saveClassificationToCsv(classification, self.pod_name, experiment_id)
@@ -187,32 +240,20 @@ class Pod():
         Save process data in csv file
         """
         log_dir = os.path.join(os.getcwd(), "data")
-        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+        _ensure_dir(log_dir)
 
         file_name = os.path.join(log_dir, f"process_metrics_experiment{experiment_id}.csv")
+        lock = _with_file_lock(file_name)
 
-        headers = [
-            "pod_name","timestamp", "pid", "comm", "state", "ppid", "pgrp", "session", "tty_nr", "tpgid", "flags",
-            "minflt", "cminflt", "majflt", "cmajflt", "utime", "stime", "cutime", "cstime",
-            "priority", "nice", "num_threads", "itrealvalue", "starttime", "vsize", "rss",
-            "rsslim", "startcode", "endcode", "startstack", "kstkesp", "kstkeip", "signal",
-            "blocked", "sigignore", "sigcatch", "wchan", "nswap", "cnswap", "exit_signal",
-            "processor", "rt_priority", "policy", "delayacct_blkio_ticks", "guest_time",
-            "cguest_time", "start_data", "end_data", "start_brk", "arg_start", "arg_end",
-            "env_start", "env_end", "exit_code",
-            "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches",
-            "vm_rss_status", "read_bytes", "write_bytes"
-        ]
-        file_exists = os.path.exists(file_name)
-
-        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
-            if not file_exists:
-                file.write(",".join(headers) + "\n")  # 헤더 추가
+        # 한 번의 atomic 구간으로 헤더/레코드 쓰기
+        with lock, open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            # 헤더는 파일 최초 생성자만 기록
+            if _need_write_header_once(file_name):
+                file.write(",".join(self.PROCESS_HEADERS) + "\n")
 
             for process in self.processes:
                 stat_values = [
-                    self.pod_name,
-                    timestamp,
+                    self.pod_name, timestamp,
                     str(process.pid), process.comm, process.state, str(process.ppid),
                     str(process.pgrp), str(process.session), str(process.tty_nr),
                     str(process.tpgid), str(process.flags), str(process.minflt),
@@ -226,14 +267,13 @@ class Pod():
                     str(process.signal), str(process.blocked), str(process.sigignore),
                     str(process.sigcatch), str(process.wchan), str(process.nswap),
                     str(process.cnswap), str(process.exit_signal), str(process.processor),
-                    str(process.rt_priority), process.policy, str(process.delayacct_blkio_ticks),
+                    str(process.rt_priority), str(process.policy), str(process.delayacct_blkio_ticks),
                     str(process.guest_time), str(process.cguest_time), str(process.start_data),
                     str(process.end_data), str(process.start_brk), str(process.arg_start),
                     str(process.arg_end), str(process.env_start), str(process.env_end),
                     str(process.exit_code)
                 ]
 
-                # metrics 값 (없으면 빈칸)
                 if process.metrics:
                     metrics_values = [
                         str(process.metrics.voluntary_ctxt_switches or ""),
@@ -244,40 +284,30 @@ class Pod():
                     ]
                 else:
                     metrics_values = ["", "", "", "", ""]
-                file.write(",".join([str(v) for v in (stat_values + metrics_values)]) + "\n")
 
-            file.write("\n")
+                file.write(",".join([*stat_values, *metrics_values]) + "\n")
 
     def saveCgroupMetricsToCSV(self, cgroup, timestamp, experiment_id=None):
         """
         Save cgroup metrics (memory, I/O) into CSV file
         """
         log_dir = os.path.join(os.getcwd(), "data")
-        os.makedirs(log_dir, exist_ok=True)
+        _ensure_dir(log_dir)
 
         file_name = os.path.join(log_dir, f"cgroup_experiment{experiment_id}.csv")
+        lock = _with_file_lock(file_name)
 
-        headers = [
-            "pod_name", "timestamp",
-            "memory_current", "memory_limit",
-            "io_read_bytes", "io_write_bytes"
-        ]
-
-        file_exists = os.path.exists(file_name)
-
-        with open(file_name, mode="a", newline="", encoding="utf-8") as file:
-            if not file_exists:
-                file.write(",".join(headers) + "\n")
+        with lock, open(file_name, mode="a", newline="", encoding="utf-8") as file:
+            if _need_write_header_once(file_name):
+                file.write(",".join(self.CGROUP_HEADERS) + "\n")
 
             row = [
-                self.pod_name,
-                timestamp,
+                self.pod_name, timestamp,
                 str(cgroup.memory_current or ""),
                 str(cgroup.memory_limit or ""),
                 str(cgroup.io_read_bytes or ""),
                 str(cgroup.io_write_bytes or "")
             ]
-
             file.write(",".join(row) + "\n")
 
     def saveProcessDataToDB(self):
@@ -350,57 +380,59 @@ class Pod():
         classification: 프로세스별 분석 결과
         summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
         """
-        log_dir = os.path.join(os.getcwd(), "data")
-        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
-
-        filename = os.path.join(log_dir, f"process_classification_experiment{experiment_id}.csv")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
         if not classification:
             return
 
-        for proc in classification:
-            proc["pod_name"] = pod_name
-            proc["timestamp"] = timestamp
+        log_dir = os.path.join(os.getcwd(), "data")
+        _ensure_dir(log_dir)
 
-        file_exists = os.path.isfile(filename)
-        keys = classification[0].keys()
+        filename = os.path.join(log_dir, f"process_classification_experiment{experiment_id}.csv")
+        lock = _with_file_lock(filename)
 
-        with open(filename, "a", newline="") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=keys)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerows(classification)
+        ts = self.get_Timestamp()
 
-        print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
+        # 스키마 고정: 필요한 키만 뽑고, 없으면 빈칸
+        def _row_from(proc: dict):
+            base = {
+                "pod_name": pod_name,
+                "timestamp": ts
+            }
+            base.update(proc)  # 기존 키를 넣되, 최종 출력은 고정 순서대로
+            return [str(base.get(k, "")) for k in self.CLASSIFICATION_KEYS_ORDER]
+
+        with lock, open(filename, "a", newline="", encoding="utf-8") as f:
+            if _need_write_header_once(filename):
+                f.write(",".join(self.CLASSIFICATION_KEYS_ORDER) + "\n")
+            for proc in classification:
+                f.write(",".join(_row_from(proc)) + "\n")
+
+        #print(f"[SAVE - classification] Appended {len(classification)} rows from {pod_name} to {filename}")
 
     def saveSummaryToCsv(self, summary, pod_name, experiment_id=None):
         """
         모든 파드 summary 결과를 하나의 CSV에 누적 저장
         """
-        log_dir = os.path.join(os.getcwd(), "data")
-        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
-
-        filename = os.path.join(log_dir, f"process_summary_experiment{experiment_id}.csv")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
         if not summary:
             return
 
-        row = {"pod_name": pod_name, "timestamp": timestamp}
-        row.update(summary)
+        log_dir = os.path.join(os.getcwd(), "data")
+        _ensure_dir(log_dir)
 
-        file_exists = os.path.isfile(filename)
-        keys = row.keys()
+        filename = os.path.join(log_dir, f"process_summary_experiment{experiment_id}.csv")
+        lock = _with_file_lock(filename)
 
-        with open(filename, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=keys)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(row)
+        ts = self.get_Timestamp()
+        # 고정 키 순서에 맞춰 값 매핑
+        base = {"pod_name": pod_name, "timestamp": ts}
+        base.update(summary)
 
-        print(f"[SAVE - summary] Appended summary for {pod_name} to {filename}")
+        with lock, open(filename, "a", newline="", encoding="utf-8") as f:
+            if _need_write_header_once(filename):
+                f.write(",".join(self.SUMMARY_KEYS_ORDER) + "\n")
+            row = [str(base.get(k, "")) for k in self.SUMMARY_KEYS_ORDER]
+            f.write(",".join(row) + "\n")
+
+        #print(f"[SAVE - summary] Appended summary for {pod_name} to {filename}")
 
     def shouldGarbageCollection(self):
         """
