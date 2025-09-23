@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-svc
+  labels:
+    app: postgres16
+spec:
+  type: NodePort
+  selector:
+    app: postgres16
+  ports:
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  labels:
+    app: postgres16
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: "testsc"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres16
+  labels:
+    app: postgres16
+spec:
+  selector:
+    matchLabels:
+      app: postgres16
+  template:
+    metadata:
+      labels:
+        app: postgres16
+    spec:
+      containers:
+      - image: junhp1234/postgresql-16.3-alpine-huge-pages:latest
+        name: postgres16
+        env:
+        - name: POSTGRES_PASSWORD
+          value: snslab          
+        - name: POSTGRES_DB
+          value: gc-data
+        - name: POSTGRES_USER
+          value: k8s_gc
+        args:
+          - "-c"
+          - "shared_buffers=4096MB"
+          - "-c"
+          - "max_connections=1000"
+        ports:
+        - containerPort: 5432
+          name: postgres16
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc

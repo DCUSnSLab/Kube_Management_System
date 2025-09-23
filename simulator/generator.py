@@ -1,11 +1,13 @@
 from kubernetes import client, config, utils
 import time
+from datetime import datetime, timezone, timedelta
 from garbagecollector import GarbageCollector
 from multiprocessing import Process, Event
 import random
 
 from pod import Pod
 from processManager import ProcessManager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def run_gc(ns, sc):
     gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
@@ -109,7 +111,7 @@ class Generator:
                 self.stop_event.set()
                 self.gc_process.join()
 
-    def experimentDataCollection(self, interval=60, cnt = 60):
+    def experimentDataCollection(self, interval=60, cnt = 60, worker = 10):
         i = 0
         while i < self.times:  # times = 10
             self.pod_list={}
@@ -127,26 +129,58 @@ class Generator:
                 self.waitForPodRunning(self.pod_list)
 
                 manager = {}
+                start_anchor = time.perf_counter()  # 고정 기준시각
                 while self.count < cnt:
                     print("\n\n")
                     print("=" * 50)
                     print(f"Start experiment {i}, {self.count} times")
                     print("=" * 50)
+
+                    # 목표 시각 계산 (fixed-rate)
+                    target_time = start_anchor + (self.count + 1) * interval
+
                     self.getPodList()
 
-                    # 추후에 변경할 예정
+                    #시간 측정
+                    start_ts = time.perf_counter()
+                    now_wall = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    print(f"[TIMING] Collecting Pod Data... for {len(self.pod_list)} pods with {worker} workers "
+                          f"at {now_wall} (perf_counter={start_ts:.3f}s)")
+
                     for p_name, p in self.pod_list.items():
                         if p_name not in manager:
-                            manager[p_name] = Pod(self.coreV1, p)
-                        pod = manager[p_name]
-                        pod.getPodProcessStatus(i+1)  # i는 실험 횟수
+                            #cfg = client.Configuration().get_default_copy()
+                            #api_client = client.ApiClient(configuration=cfg)
+                            core_api = client.CoreV1Api()
+                            manager[p_name] = Pod(core_api, p)
 
-                        # filtered_processes = [proc for proc in pod.processes if proc.pid != 1]
+                    futures = []
+                    with ThreadPoolExecutor(max_workers=worker) as executor:
+                        for p_name in self.pod_list.keys():
+                            pod = manager[p_name]
+                            futures.append(executor.submit(pod.getPodProcessStatus, i+1))
 
-                        # pm = manager[p_name]
-                        # pm.analyzePodProcess(pod.processes)
+                        for fut in as_completed(futures):
+                            try:
+                                _ = fut.result()
+                            except Exception as e:
+                                print(f"[WARN] Fail to collect status for a pod: {e}")
 
-                    time.sleep(interval)
+                    elapsed = time.perf_counter() - start_ts
+                    print(f"[TIMING] Collected statuses for {len(self.pod_list)} pods [{elapsed:.3f}s]")
+
+                    now = time.perf_counter()
+                    sleep_time = target_time - now
+                    if sleep_time > 0:
+                        # 종료 예정 시각 (UTC 기준)
+                        wakeup_wall = datetime.now(timezone.utc) + timedelta(seconds=sleep_time)
+                        print(f"[SLEEP] Sleeping {sleep_time:.2f}s "
+                              f"(until {wakeup_wall.strftime('%Y-%m-%d %H:%M:%S %Z')})")
+                        time.sleep(sleep_time)
+                    else:
+                        # 오버런: 작업이 60초를 넘김 -> 드리프트 경고만 하고 바로 다음 회차 진행
+                        print(f"[DRIFT] Overran by {-sleep_time:.3f}s; skipping sleep to realign")
 
                     self.count += 1
                 self.deletePod()

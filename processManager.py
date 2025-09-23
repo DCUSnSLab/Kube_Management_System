@@ -345,7 +345,7 @@ class ProcessManager:
         }
         for process in processes:
             classification = self._classify_process(process, pod_name, current_time, boot_time)
-            print(classification)
+            # print(classification)
             process_classification.append(classification)
 
             # 분류 결과 요약
