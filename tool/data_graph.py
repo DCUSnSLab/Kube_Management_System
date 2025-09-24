@@ -852,13 +852,13 @@ class CyclePlotterApp(QWidget):
             self.datasets = {"default": prepare_df_base(data)}
         #self.numeric_cols = select_numeric_metric_cols(self.df)
 
-        root = QVBoxLayout(self)
-        self.tabs = QTabWidget()
-        root.addWidget(self.tabs)
-
         self.current_key = next(iter(self.datasets.keys()))
         self.df = self.datasets[self.current_key]
         self.numeric_cols = select_numeric_metric_cols(self.df)
+
+        root = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs)
 
         # ---------- Tab 1 ----------
         self.tab3 = OverlayTab(self.df, self.numeric_cols, datasets=self.datasets)
@@ -931,6 +931,7 @@ class CyclePlotterApp(QWidget):
             "active_memory_intensive", "active_multithreaded", "active_resource_intensive",
             "bg_cpu_worker", "bg_memory_cache", "bg_network_service",
             "running_continuous", "running_event_loop", "running_task_queue",
+            "inactive_idle", "inactive_sleeping", "inactive_waiting"
         ]
 
         self.tab_cs = CommStateGrid(
@@ -938,8 +939,28 @@ class CyclePlotterApp(QWidget):
             comm_list=comm_exact_list,
             numeric_cols=self.numeric_cols,  # ← metric 후보 전달!
         )
-        self.tabs.addTab(self.tab_cs, "Tab 2: Comm-State grid")
+        # self.tabs.addTab(self.tab_cs, "Tab 2: Comm-State grid")
+        #
+        # self.tab3.redraw()
+        tab2 = QWidget()
+        l2 = QVBoxLayout(tab2)
+        # 실험 선택 콤보
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Experiment"))
+        self.cb_exp = QComboBox()
+        self.cb_exp.setMinimumWidth(120)
+        self.cb_exp.addItem("All")  # 전체 합본
+        for key in self.datasets.keys():
+            self.cb_exp.addItem(key)
+        self.cb_exp.currentIndexChanged.connect(self._switch_experiment_tab2)
+        top_row.addWidget(self.cb_exp)
+        top_row.addStretch(1)
+        l2.addLayout(top_row)
+        self.tab2_grid = CommStateGrid(self.df, comm_list=comm_exact_list, numeric_cols=self.numeric_cols)
+        l2.addWidget(self.tab2_grid)
+        self.tabs.addTab(tab2, "Tab 2: Comm-State grid")
 
+        # Tab1 redraw
         self.tab3.redraw()
 
     # -------- Tab1 --------
@@ -994,13 +1015,41 @@ class CyclePlotterApp(QWidget):
             sB = pd.Series(dtype="float64")
         self.panel2_b.draw_series(sB)
 
+    def _switch_experiment_tab2(self):
+        """탭2 실험 선택 콤보박스 이벤트"""
+        key = self.cb_exp.currentText()
+        if key == "All":
+            # 모든 DF를 concat
+            df_new = pd.concat(self.datasets.values(), ignore_index=True)
+        else:
+            df_new = self.datasets[key]
+
+        df_new = prepare_df_base(df_new)
+        numeric_cols = select_numeric_metric_cols(df_new)
+
+        # 기존 grid 위젯 교체
+        parent_layout = self.tab2_grid.parent().layout()
+        parent_layout.removeWidget(self.tab2_grid)
+        self.tab2_grid.setParent(None)
+        # self.tab2_grid.deleteLater()
+
+        self.tab2_grid = CommStateGrid(df_new, comm_list=self.comm_exact_list, numeric_cols=numeric_cols)
+        parent_layout.addWidget(self.tab2_grid)
 
 # ----------------------------
 # main: 외부에서 DataFrame을 주입해서 실행
 # ----------------------------
 def center_on_primary(win):
     """메인 모니터(Primary) 가용 영역의 정중앙에 윈도우를 위치시킵니다."""
-    screen = QGuiApplication.primaryScreen()
+    # screen = QGuiApplication.primaryScreen()
+    screens = QGuiApplication.screens()
+    if not screens:
+        return
+
+    # 범위 초과 방지
+    idx = max(0, min(1, len(screens) - 1))
+    screen = screens[idx]
+
     geo = screen.availableGeometry()     # 작업 표시줄 제외 영역
     # frameGeometry는 show() 이후에 제대로 계산됨
     fg = win.frameGeometry()

@@ -111,7 +111,7 @@ class Generator:
                 self.stop_event.set()
                 self.gc_process.join()
 
-    def experimentDataCollection(self, interval=60, cnt = 60, worker = 10):
+    def experimentDataCollection(self, interval=60, cnt=60, worker=10):
         i = 0
         while i < self.times:  # times = 10
             self.pod_list={}
@@ -267,7 +267,7 @@ class Generator:
             print(f"{state} pod {count} created")
             count += 1
 
-    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.5, max_ratio=0.9):
+    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.7, max_ratio=0.9):
         """
         랜덤 숫자 생성 (비율에 맞게 생성)
         """

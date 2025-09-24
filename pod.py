@@ -86,7 +86,7 @@ class Pod():
             "pod_name", "timestamp", "pid", "comm", "role", "state", "score", "reason"
         ]
         self.SUMMARY_KEYS_ORDER = [
-            "pod_name", "timestamp", "active_cnt", "idle_cnt", "running_cnt", "bg_active_cnt", "note"
+            "pod_name", "timestamp", "total", "active_cnt", "idle_cnt", "running_cnt", "bg_active_cnt", "note"
         ]
 
     def test(self):
