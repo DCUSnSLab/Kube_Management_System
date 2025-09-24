@@ -1047,7 +1047,8 @@ def center_on_primary(win):
         return
 
     # 범위 초과 방지
-    idx = max(0, min(1, len(screens) - 1))
+    screennum = 1  # 띄울 모니터 번호
+    idx = max(0, min(screennum, len(screens) - 1))
     screen = screens[idx]
 
     geo = screen.availableGeometry()     # 작업 표시줄 제외 영역
