@@ -69,11 +69,11 @@ def main():
     
     while True:
         # 작업 생성
-        for _ in range(random.randint(5, 15)):
+        for _ in range(random.randint(3, 8)):
             work_id += 1
             work_item = {
                 'id': work_id,
-                'iterations': random.randint(1000, 10000)
+                'iterations': random.randint(1000, 5000)
             }
             try:
                 work_queue.put(work_item, timeout=0.1)

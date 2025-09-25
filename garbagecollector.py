@@ -20,21 +20,9 @@ class GarbageCollector():
         self.count = 1
         self._stop_event = stop_event or Event()
 
-    # def manage(self):
-    #     if self.devMode is True:
-    #         self.namespace = 'swlabpods-gc'
-    #     self.listPods()
-    #
-    #     for p_name, p_obj in self.podlist.items():
-    #         print(p_name)
-    #         p_obj.getResultHistory()
-    #
-    #         p_obj.insertProcessData()
-    #         # p.getResultProcess()
-
     def manage(self):
         if self.devMode is True:
-            self.namespace = 'swlabpods-gc'
+            self.namespace = 'gc-simulator'
 
         while True:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -43,16 +31,18 @@ class GarbageCollector():
             print('='*10+f"Start to Check Process Data {self.count} times"+'='*10)
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
-                p_obj.insertProcessData()
                 p_obj.insert_Pod_Info()
-                result_history = p_obj.getResultHistory()
+
+                should_gc, gc_reason, type = p_obj.shouldGarbageCollection()
 
                 # save logging data
-                # p_obj.saveDataToCSV()
                 p_obj.saveProcessDataToDB()
 
-                if not result_history and p_obj.checkCreateTime():  # 7일이상 사용하지않으면 false 반환
-                    p_obj.insert_DeleteReason('GC_h')
+                if should_gc is True:
+                    print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
+                    print(f"  Reason: {gc_reason}")
+                    print(f"  Type: {type}")
+                    p_obj.insert_DeleteReason(gc_reason)
                     p_obj.save_DeleteReason_to_DB()
                     self.deletePod(p_name)  # pod 삭제
 
@@ -111,7 +101,7 @@ class GarbageCollector():
         for rm_p in removed_pods:
             pod_obj = self.podlist[rm_p]
             if not pod_obj.is_deleted_in_DB():  # DB에 삭제된 시간이 없는 경우만 처리
-                pod_obj.insert_DeleteReason('UNKNOWN')
+                pod_obj.insert_DeleteReason("UNKNOWN - Pod deleted")
                 pod_obj.save_DeleteReason_to_DB()
             print(f"Pod removed: {rm_p}")
 
@@ -124,6 +114,6 @@ if __name__ == "__main__":
     initialize_database()  # PostgreSQL DB 초기화
 
     #네임스페이스 값을 비워두면 'default'로 지정
-    gc = GarbageCollector(namespace='swlabpods', isDev=False)
+    gc = GarbageCollector(namespace='swlabpods', isDev=True)
     gc.manage()
     # gc.logging()

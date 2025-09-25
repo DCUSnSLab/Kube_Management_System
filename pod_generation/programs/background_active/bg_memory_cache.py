@@ -44,7 +44,7 @@ def main():
     print(f"[BACKGROUND] Memory Cache Started - PID: {os.getpid()}", flush=True)
     
     # 백그라운드 캐시 서비스
-    cache = LRUCache(capacity_mb=50)  # 50MB 캐시
+    cache = LRUCache(capacity_mb=80)  # 80MB
     log_file = f"/tmp/bg_cache_{os.getpid()}.log"
     
     operation_count = 0

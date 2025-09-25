@@ -19,25 +19,25 @@ def simulate_compilation():
     """GCC 컴파일 작업 시뮬레이션"""
     result = 0
     # 컴파일 시 발생하는 CPU 집약적 작업
-    for i in range(2000000):
+    for i in range(3000000):  # 3M
         result += i ** 2
         result = result % 1000007
         # Symbol table, parsing 시뮬레이션
-        if i % 100000 == 0:
-            temp = [j*2 for j in range(1000)]
+        if i % 80000 == 0:  # 80K
+            temp = [j*2 for j in range(1500)]
     return result
 
 def simulate_student_program():
     """학생 프로그램 실행 시뮬레이션 (정렬, 행렬 연산 등)"""
     # 정렬 알고리즘 시뮬레이션
-    data = [random.randint(1, 10000) for _ in range(5000)]
+    data = [random.randint(1, 10000) for _ in range(8000)]
     data.sort()
     
     # 행렬 연산 시뮬레이션
-    matrix = [[random.random() for _ in range(100)] for _ in range(100)]
+    matrix = [[random.random() for _ in range(120)] for _ in range(120)]  # 120x120
     result = 0
-    for i in range(100):
-        for j in range(100):
+    for i in range(120):
+        for j in range(120):
             result += matrix[i][j]
     return result
 

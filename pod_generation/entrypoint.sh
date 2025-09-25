@@ -108,29 +108,5 @@ echo "================================================"
 echo "All processes launched. Container will keep running..."
 echo "================================================"
 
-# 프로세스 모니터링 함수
-monitor_processes() {
-    while true; do
-        # 30초마다 프로세스 상태 체크
-        sleep 30
-
-        # 실행 중인 프로세스 수 확인
-        RUNNING=$(jobs -r | wc -l)
-
-        if [ $RUNNING -gt 0 ]; then
-            echo "[Monitor] $(date): $RUNNING processes running"
-
-            # 상세 정보 출력 (디버깅용, 주석 처리 가능)
-            # ps aux | grep -E "python.*\.py" | grep -v grep
-        else
-            echo "[Monitor] $(date): No processes running, container will exit"
-            exit 0
-        fi
-    done
-}
-
-# 백그라운드에서 모니터링 시작
-monitor_processes &
-
 # 모든 자식 프로세스가 종료될 때까지 대기
 wait

@@ -1,4 +1,6 @@
 from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
 
 class Mode_State(Enum):
     R = 'Running'
@@ -6,6 +8,7 @@ class Mode_State(Enum):
     D = 'Uninterruptible Sleep'
     Z = 'Zombie'
     T = 'Stopped'
+    X = 'Dead'
 
 class Policy_State(Enum):
     SCHED_NORMAL = 0
@@ -71,3 +74,30 @@ class Process:
 
         self.env_end = None  # Address of end of environment variables
         self.exit_code = None  # Process exit code
+
+        self.metrics: Optional[ProcessMetrics] = None
+
+@dataclass
+class ProcessMetrics:
+    """프로세스의 추가 메트릭 정보"""
+    # Context Switch 정보 (/proc/[pid]/status)
+    voluntary_ctxt_switches: Optional[int] = None
+    nonvoluntary_ctxt_switches: Optional[int] = None
+
+    # 메모리 상세 정보 (/proc/[pid]/status)
+    vm_rss: Optional[int] = None  # Resident set size
+
+    # I/O 정보 (/proc/[pid]/io), I/O workload 확인
+    read_bytes: Optional[int] = None
+    write_bytes: Optional[int] = None
+
+@dataclass
+class CgroupMetrics:
+    """cgroup 메트릭 정보"""
+    # Memory cgroup 정보
+    memory_current: Optional[int] = None  # Pod 메모리 사용량 추이
+    memory_limit: Optional[int] = None  # limit 대비 사용량 비율 계산에 필요
+
+    # IO cgroup 정보
+    io_read_bytes: Optional[int] = None  # Pod 전체 I/O 트래픽 분석
+    io_write_bytes: Optional[int] = None  # Pod 전체 I/O 트래픽 분석
