@@ -256,6 +256,19 @@ def build_normalized_usage_table(
             .astype("float64")
         )
 
+    # --- cpu_time(utime+stime) 계산 ---
+    # 🔹 utime+stime = cpu_time 계산
+    tmp["cpu_time"] = tmp["utime"] + tmp["stime"]
+
+    # 🔹 cpu_time_delta 계산
+    tmp["cpu_time_delta"] = (
+        tmp.groupby(gkeys, sort=False)["cpu_time"]
+        .diff()
+        .clip(lower=0)
+        .fillna(0.0)
+        .astype("float64")
+    )
+
     # --- cpu_rate 계산 ---
     # curr_time = utime_delta + stime_delta
     tmp["cpu_time_sum"] = tmp["utime_delta"] + tmp["stime_delta"]
@@ -271,8 +284,10 @@ def build_normalized_usage_table(
     # 첫 행은 NaN -> 0으로 채움
     tmp["cpu_rate"] = tmp["cpu_rate"].fillna(0.0)
 
-    # 델타 및 cpu_rate 원래 순서로 붙이기
-    extra_cols = [f"{c}_delta" for c in cumulative_cols] + ["cpu_rate"]
+    # 델타 및 cpu_rate, cpu_time, cpu_time_delta 원래 순서로 붙이기
+    extra_cols = [f"{c}_delta" for c in cumulative_cols] + [
+        "cpu_rate", "cpu_time", "cpu_time_delta"
+    ]
     out = out.merge(tmp[["_row_pos"] + extra_cols], on="_row_pos", how="left")
 
     # cycle_id 부여
@@ -285,7 +300,8 @@ def build_normalized_usage_table(
         "utime", "utime_delta",
         "stime", "stime_delta",
         "cutime", "cutime_delta",
-        "minflt", "majflt",
+        "cpu_time", "cpu_time_delta",
+        "minflt", "minflt_delta", "majflt", "majflt_delta",
         "num_threads",
         "vsize", "vsize_delta",
         "rss", "rss_delta",
