@@ -16,7 +16,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QListWidget, QListWidgetItem, QTabWidget, QMessageBox,
-    QFrame, QPushButton, QLineEdit, QScrollArea, QGroupBox, QSizePolicy
+    QFrame, QPushButton, QLineEdit, QScrollArea, QGroupBox, QSizePolicy, QStackedWidget
 )
 
 import numpy as np
@@ -278,7 +278,7 @@ class TemplatePanel(QWidget):
         if s is not None and len(s) > 0:
             x = s.index.values
             y = s.values
-            ax.plot(x, y, marker="o")
+            ax.plot(x, y, marker="o", markersize=3)
             ax.set_xlim(min(x), max(x))
         else:
             ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
@@ -610,7 +610,7 @@ class OverlayTab(QWidget):
 
             any_data = True
             label = self._series_label(i, sp, metric)
-            ax.plot(s.index.values, s.values, marker="o", label=label)
+            ax.plot(s.index.values, s.values, marker="o", markersize=3, label=label)
 
         if not any_data:
             ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
@@ -728,9 +728,9 @@ class CommStateGrid(QWidget):
         if d.empty or metric not in d.columns: return pd.Series(dtype="float64"), pd.Series(dtype="float64")
         d["state_norm"] = d["state"].map(self._norm_state)
         gb = d.groupby([GROUP_COL, "state_norm"], as_index=True)[metric]
-        pv = (gb.sum() if how == "Sum" else gb.mean()).unstack(fill_value=0).sort_index()
-        s_run = pv["running"] if "running" in pv.columns else pd.Series(0, index=pv.index)
-        s_slp = pv["sleep"]   if "sleep"   in pv.columns else pd.Series(0, index=pv.index)
+        pv = (gb.sum() if how == "Sum" else gb.mean()).unstack().sort_index()
+        s_run = pv["running"] if "running" in pv.columns else pd.Series(dtype="float64")
+        s_slp = pv["sleep"] if "sleep" in pv.columns else pd.Series(dtype="float64")
         return s_run, s_slp
 
     def _series_metric_prefix_avg(self, prefix: str, metric: str) -> tuple[pd.Series, pd.Series]:
@@ -744,7 +744,7 @@ class CommStateGrid(QWidget):
         # 우선 comm 단위로 cycle_id×state 평균을 구한 뒤, 그 평균들을 다시 평균
         gb = d.groupby([ "__comm_norm__", GROUP_COL, "state_norm"], as_index=False)[metric].mean()
         pv = (gb.pivot_table(index=GROUP_COL, columns="state_norm", values=metric, aggfunc="mean")
-                .fillna(0).sort_index())
+              .sort_index())  # fillna(0) 제거
         s_run = pv["running"] if "running" in pv.columns else pd.Series(0, index=pv.index)
         s_slp = pv["sleep"]   if "sleep"   in pv.columns else pd.Series(0, index=pv.index)
         return s_run, s_slp
@@ -762,10 +762,10 @@ class CommStateGrid(QWidget):
             return
         xmins, xmaxs = [], []
         if len(s_run)>0:
-            ax.plot(s_run.index.values, s_run.values, marker="o", label="running")
+            ax.plot(s_run.index.values, s_run.values, marker="o", markersize=3, label="running")
             xmins.append(s_run.index.min()); xmaxs.append(s_run.index.max())
         if len(s_slp)>0:
-            ax.plot(s_slp.index.values, s_slp.values, marker="o", label="sleep")
+            ax.plot(s_slp.index.values, s_slp.values, marker="o", markersize=3, label="sleep")
             xmins.append(s_slp.index.min()); xmaxs.append(s_slp.index.max())
         if xmins and xmaxs: ax.set_xlim(min(xmins), max(xmaxs))
         ax.set_xlabel(GROUP_COL); ax.set_ylabel(ylabel); ax.grid(True, linestyle="--", alpha=0.4)
@@ -944,24 +944,62 @@ class CyclePlotterApp(QWidget):
         # self.tab3.redraw()
         tab2 = QWidget()
         l2 = QVBoxLayout(tab2)
+
         # 실험 선택 콤보
+        # top_row = QHBoxLayout()
+        # top_row.addWidget(QLabel("Experiment"))
+        # self.cb_exp = QComboBox()
+        # self.cb_exp.setMinimumWidth(120)
+        # self.cb_exp.addItem("All")  # 전체 합본
+        # for key in self.datasets.keys():
+        #     self.cb_exp.addItem(key)
+        # self.cb_exp.currentIndexChanged.connect(self._switch_experiment_tab2)
+        # top_row.addWidget(self.cb_exp)
+        # top_row.addStretch(1)
+        # l2.addLayout(top_row)
+        # self.tab2_grid = CommStateGrid(self.df, comm_list=comm_exact_list, numeric_cols=self.numeric_cols)
+        # l2.addWidget(self.tab2_grid)
+        # self.tabs.addTab(tab2, "Tab 2: Comm-State grid")
+        #
+        # # Tab1 redraw
+        # self.tab3.redraw()
+
+        # CyclePlotterApp.__init__ 안에 Tab2 생성 부분
+        tab2 = QWidget()
+        l2 = QVBoxLayout(tab2)
+
+        # 콤보박스
         top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Experiment"))
+        label = QLabel("Experiment")
+        top_row.addWidget(label)
+
         self.cb_exp = QComboBox()
-        self.cb_exp.setMinimumWidth(120)
         self.cb_exp.addItem("All")  # 전체 합본
         for key in self.datasets.keys():
             self.cb_exp.addItem(key)
-        self.cb_exp.currentIndexChanged.connect(self._switch_experiment_tab2)
+
         top_row.addWidget(self.cb_exp)
         top_row.addStretch(1)
         l2.addLayout(top_row)
-        self.tab2_grid = CommStateGrid(self.df, comm_list=comm_exact_list, numeric_cols=self.numeric_cols)
-        l2.addWidget(self.tab2_grid)
-        self.tabs.addTab(tab2, "Tab 2: Comm-State grid")
 
-        # Tab1 redraw
-        self.tab3.redraw()
+        # StackedWidget 생성
+        self.stack = QStackedWidget()
+        l2.addWidget(self.stack)
+
+        # All 데이터
+        df_all = pd.concat(self.datasets.values(), ignore_index=True)
+        grid_all = CommStateGrid(df_all, comm_list=comm_exact_list, numeric_cols=self.numeric_cols)
+        self.stack.addWidget(grid_all)
+
+        # 각 실험별
+        for key, df in self.datasets.items():
+            grid = CommStateGrid(df, comm_list=comm_exact_list, numeric_cols=self.numeric_cols)
+            self.stack.addWidget(grid)
+
+        # 콤보박스 이벤트 → 스택 전환
+        self.cb_exp.currentIndexChanged.connect(self.stack.setCurrentIndex)
+
+        self.tabs.addTab(tab2, "Tab 2: Comm-State grid")
 
     # -------- Tab1 --------
     def _tab1_shared_filters(self) -> List[Tuple[str, Optional[str]]]:
@@ -1014,27 +1052,6 @@ class CyclePlotterApp(QWidget):
         else:
             sB = pd.Series(dtype="float64")
         self.panel2_b.draw_series(sB)
-
-    def _switch_experiment_tab2(self):
-        """탭2 실험 선택 콤보박스 이벤트"""
-        key = self.cb_exp.currentText()
-        if key == "All":
-            # 모든 DF를 concat
-            df_new = pd.concat(self.datasets.values(), ignore_index=True)
-        else:
-            df_new = self.datasets[key]
-
-        df_new = prepare_df_base(df_new)
-        numeric_cols = select_numeric_metric_cols(df_new)
-
-        # 기존 grid 위젯 교체
-        parent_layout = self.tab2_grid.parent().layout()
-        parent_layout.removeWidget(self.tab2_grid)
-        self.tab2_grid.setParent(None)
-        # self.tab2_grid.deleteLater()
-
-        self.tab2_grid = CommStateGrid(df_new, comm_list=self.comm_exact_list, numeric_cols=numeric_cols)
-        parent_layout.addWidget(self.tab2_grid)
 
 # ----------------------------
 # main: 외부에서 DataFrame을 주입해서 실행
