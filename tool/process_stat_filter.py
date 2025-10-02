@@ -157,10 +157,29 @@ def add_cpu_time_and_delta(df: pd.DataFrame) -> pd.DataFrame:
     df["cpu_time_delta"] = df.groupby("pod_name")["cpu_time"].diff()
     return df
 
+def add_cycle_number(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    타임스탬프 다음 열에 cycle 번호(몇번째 수집인지)를 추가
+    pod_name 기준으로 그룹별 순번을 매김
+    """
+    # pod_name 별로 1부터 시작하는 순번 부여
+    df["cycle"] = df.groupby("pod_name").cumcount() + 1
+
+    # cycle 열을 timestamp 바로 뒤로 이동
+    cols = list(df.columns)
+    if "timestamp" in cols and "cycle" in cols:
+        ts_index = cols.index("timestamp")
+        # timestamp 다음 위치에 cycle 넣기
+        cols.insert(ts_index + 1, cols.pop(cols.index("cycle")))
+        df = df[cols]
+
+    return df
+
 def preprocess_file(file_path: str) -> pd.DataFrame:
     """개별 파일에 대해 전처리 실행"""
     df = load_data(file_path)
     df = process_data(df)
+    df = add_cycle_number(df)
     df = add_deltas(df)
     df = add_cpu_time_and_delta(df)
     df = align_timestamps(df, base_pod="active-0")
