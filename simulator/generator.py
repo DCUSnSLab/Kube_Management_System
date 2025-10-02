@@ -74,7 +74,7 @@ class Generator:
         """
         Run simulation
         """
-        # self.gc_process.start()
+        self.gc_process.start()
         try:
             while self.count < self.times:
                 # 실험 시작 전 카운트 횟수 및 파드 수 초기화
