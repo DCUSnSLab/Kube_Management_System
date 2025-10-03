@@ -62,7 +62,7 @@ class ProcessManager:
             "for stat in /proc/[0-9]*/stat; do "
             "  if [ -r \"$stat\" ]; then "
             "    PID=$(basename $(dirname \"$stat\")) && "
-            "    if [ \"$PID\" != \"$SELF_PID\" ]; then "
+            "    if [ \"$PID\" != \"$SELF_PID\" ] && [ \"$PID\" != 1 ]; then "
             "      STAT_LINE=$(cat \"$stat\" 2>/dev/null) && "
             "      COMM=$(echo \"$STAT_LINE\" | awk '{print $2}') && "
             "      PPID=$(echo \"$STAT_LINE\" | awk '{print $4}') && "
@@ -526,14 +526,25 @@ if __name__ == "__main__":
     v1 = client.CoreV1Api()
     pods: dict = v1.list_namespaced_pod('swlabpods').items
     cnt = 0
+    p = None
+    processes = None
     for pod in pods:
         if cnt == 30:
             break
         p = ProcessManager(v1, pod)
+        processes = p.getPorcessData()
         print(cnt, pod.metadata.name)
-        print(p.getProcStat(), '\n')
-        # print(p.getCgroupMetrics(), '\n')
-        # print(p.getProcessMetrics(517239), '\n')
+        cnt += 1
+    endTime = time.time()
+    runtime = endTime - startTime
+    print(f"전체 수행 시간: {runtime:.2f}초")
+
+    startTime = time.time()
+    cnt = 0
+    for pod in pods:
+        if cnt == 30:
+            break
+        print(p.analyzePodProcess(processes))
         cnt += 1
 
     endTime = time.time()
