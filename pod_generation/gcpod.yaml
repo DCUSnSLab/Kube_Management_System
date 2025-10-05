@@ -1,13 +1,91 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: experiment-pod
+  name: experiment-pod-active
 spec:
   containers:
     - name: experiment-container
       image: harbor.cu.ac.kr/swlabpods/gcpod:latest
+      resources:
+        requests:
+          cpu: 50m
+          memory: 150Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
       env:
-        - name: MODE
-          value: "active" #active, idle, mixed
+        - name: PROCESS_STATE
+          value: "active"
         - name: NUM_PROCS
           value: "1"
+        - name: PROCESS_MIX
+          value: "single"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: experiment-pod-background
+spec:
+  containers:
+    - name: experiment-container
+      image: harbor.cu.ac.kr/swlabpods/gcpod:latest
+      resources:
+        requests:
+          cpu: 50m
+          memory: 150Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
+      env:
+        - name: PROCESS_STATE
+          value: "background_active"
+        - name: NUM_PROCS
+          value: "1"
+        - name: PROCESS_MIX
+          value: "single"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: experiment-pod-running
+spec:
+  containers:
+    - name: experiment-container
+      image: harbor.cu.ac.kr/swlabpods/gcpod:latest
+      resources:
+        requests:
+          cpu: 50m
+          memory: 150Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
+      env:
+        - name: PROCESS_STATE
+          value: "running"
+        - name: NUM_PROCS
+          value: "1"
+        - name: PROCESS_MIX
+          value: "single"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: experiment-pod-idle
+spec:
+  containers:
+    - name: experiment-container
+      image: harbor.cu.ac.kr/swlabpods/gcpod:latest
+      resources:
+        requests:
+          cpu: 50m
+          memory: 150Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
+      env:
+        - name: PROCESS_STATE
+          value: "idle"
+        - name: NUM_PROCS
+          value: "1"
+        - name: PROCESS_MIX
+          value: "single"
