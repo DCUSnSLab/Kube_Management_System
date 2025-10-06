@@ -439,7 +439,7 @@ class ProcessManager:
         deltas['CPUtime'] = (p.utime + p.stime) - (prev.get('utime', 0) + prev.get('stime',0))
         deltas['voluntary_ctxt'] = p.metrics.voluntary_ctxt_switches - prev.get('voluntary_ctxt', 0)
         deltas['nonvoluntary_ctxt'] = p.metrics.nonvoluntary_ctxt_switches - prev.get('nonvoluntary_ctxt', 0)
-        deltas['rss'] = (p.metrics.vm_rss or 0) - prev.get('rss', 0)
+        deltas['rss'] = (p.rss or 0) - prev.get('rss', 0)
         deltas['minflt'] = p.minflt - prev.get('minflt', 0)
         deltas['io_bytes'] = ((p.metrics.read_bytes or 0) + (p.metrics.write_bytes or 0)) - prev.get('io_bytes', 0)
 
