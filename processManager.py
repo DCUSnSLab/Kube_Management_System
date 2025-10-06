@@ -55,7 +55,7 @@ class ProcessManager:
         return processes
 
     def getProcStat(self):
-        # 자기 자신을 제외하고, PPID가 1인 'sleep' 프로세스도 제외하는 쉘 스크립트 사용
+        # 자기 자신과 PPID가 1인 'sleep', pid가 1인 프로세스를 제외하는 쉘 스크립트 사용
         command = [
             "sh", "-c",
             "SELF_PID=$$ && "
@@ -489,6 +489,7 @@ class ProcessManager:
         if summary['active'] > 0:
             if pod_name in self.podInactiveSince:
                 self.podInactiveSince.pop(pod_name, None)
+            print(f"{summary['active']} pods active")
             return{
                 'should_gc': False,
                 'reason': f"Pod has {summary['active']} active process(es)"
@@ -500,6 +501,7 @@ class ProcessManager:
             inactive_elapsed = current_time - self.podInactiveSince[pod_name]
             if inactive_elapsed >= ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD:
                 reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD / 60:.0f} min)"
+                print(reason)
                 return {
                     'should_gc': True,
                     'reason': reason
@@ -508,12 +510,14 @@ class ProcessManager:
                 # 아직 임계시간 미도달
                 remain = ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD - inactive_elapsed
                 reason = f"All processes inactive, waiting {remain / 60:.1f} more min to GC"
+                print(reason)
                 return {
                     'should_gc': False,
                     'reason': reason
                 }
 
         # 3. 기본적으로 GC하지 않음
+        print(f"Default, and summary\n{summary}")
         return{
             'should_gc': False,
             'reason': f"Pod has {summary['inactive']} inactive process"
@@ -524,29 +528,40 @@ if __name__ == "__main__":
 
     config.load_kube_config()
     v1 = client.CoreV1Api()
-    pods: dict = v1.list_namespaced_pod('swlabpods').items
+    pods: dict = v1.list_namespaced_pod('gc-simulator').items
+    podlist = {}
+    process_data = {}
     cnt = 0
-    p = None
-    processes = None
     for pod in pods:
         if cnt == 30:
             break
         p = ProcessManager(v1, pod)
-        processes = p.getPorcessData()
+        podlist[pod.metadata.name] = p
+        process_data[pod.metadata.name] = p.getPorcessData()
         print(cnt, pod.metadata.name)
         cnt += 1
     endTime = time.time()
     runtime = endTime - startTime
     print(f"전체 수행 시간: {runtime:.2f}초")
 
-    startTime = time.time()
-    cnt = 0
-    for pod in pods:
-        if cnt == 30:
+    for i in range(10):
+        startTime = time.time()
+        cnt = 0
+        for pod in pods:
+            if cnt == 30:
+                break
+            print(podlist[pod.metadata.name].analyzePodProcess(process_data[pod.metadata.name]))
+            cnt += 1
+        endTime = time.time()
+        runtime = endTime - startTime
+        print(f"알고리즘 수행 시간: {runtime:.2f}초")
+        if i == 9:
             break
-        print(p.analyzePodProcess(processes))
-        cnt += 1
-
-    endTime = time.time()
-    runtime = endTime - startTime
-    print(f"전체 수행 시간: {runtime:.2f}초")
+        time.sleep(60)
+        startTime = time.time()
+        for pod in pods:
+            processes = podlist[pod.metadata.name].getPorcessData()
+            process_data[pod.metadata.name] = processes
+        endTime = time.time()
+        runtime = endTime - startTime
+        print(f"전체 수행 시간: {runtime:.2f}초")
