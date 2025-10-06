@@ -381,7 +381,7 @@ class ProcessManager:
 
         # 증가량(delta) 계산
         prev = prev_states[p.pid]
-        deltas = self.ㅋ_calculateDeltas(p, prev)
+        deltas = self._calculateDeltas(p, prev)
 
         # 2. Running/Uninterruptible 프로세스는 활성
         if p.state in ProcessStatePolicy.ACTIVE_STATES:

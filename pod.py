@@ -16,6 +16,7 @@ from DB_postgresql import (
 )
 
 from datetime import datetime, timezone, timedelta, time
+import time
 # pod.py 맨 위 import 근처에 추가
 import threading
 from collections import defaultdict

@@ -40,7 +40,7 @@ class GarbageCollector():
             # 시간 측정
             start_ts = time.perf_counter()
             now_wall = timestamp
-            print(f"[TIMING] Collecting Pod Data... for {len(self.pod_list)} pods with {worker} workers "
+            print(f"[TIMING] Collecting Pod Data... for {len(self.podlist)} pods with {worker} workers "
                   f"at {now_wall} (perf_counter={start_ts:.3f}s)")
 
             futures = []
@@ -55,7 +55,7 @@ class GarbageCollector():
                     except Exception as e:
                         print(f"[WARN] Fail to collect status for a pod: {e}")
             elapsed = time.perf_counter() - start_ts
-            print(f"[TIMING] Collected statuses for {len(self.pod_list)} pods [{elapsed:.3f}s]")
+            print(f"[TIMING] Collected statuses for {len(self.podlist)} pods [{elapsed:.3f}s]")
 
             for p_name, p_obj in self.podlist.items():
                 print(p_name)
