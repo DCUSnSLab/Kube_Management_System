@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from datetime import datetime
 import csv
@@ -12,7 +13,12 @@ class ProcessStateClassification(Enum):
     """프로세스 상태 분류"""
     ACTIVE = "active"          # 활성 프로세스
     INACTIVE = "inactive"      # 비활성 프로세스
-    GC = "gc"                  # GC 대상 (비활성 상태)
+
+class PodActivityStatus(Enum):
+    """프로세스 상태 기반 파드 활성 유무 결정"""
+    ACTIVE = "active"          # 활성 상태 (활성 프로세스가 1개이상 있음)
+    INACTIVE = "inactive"      # 비활성 상태 (프로세스 모두 비활성)
+    GC = "gc"                  # GC 대상 (비활성 상태 특정 시간동안 지속)
 
 class ProcessStatePolicy:
     """프로세스 상태 분류 기준"""
@@ -308,14 +314,14 @@ class ProcessManager:
         """
         return:
         분석결과
-          - should_gc(gc여부): bool
+          - isActive(gc여부): bool
           - reason(gc이유): str
           - detailed_classification(프로세스 분류 정보): dict
           - process_summary(프로세스 요약정보): dict
         """
         if not processes:
             return{
-                'should_gc': False,
+                'isActive': False,
                 'reason': 'no processes found',
                 'detailed_classification': {},
                 'process_summary': {}
@@ -348,9 +354,9 @@ class ProcessManager:
         self._updateState(pod_name, processes, current_time)
 
         # GC 여부 결정
-        gc_decision = self._make_gc_decision(process_summary, pod_name, current_time)
+        gc_decision = self._decideActivityStatus(process_summary, pod_name, current_time)
 
-        return gc_decision['should_gc'], gc_decision['reason'], process_classification, process_summary
+        return gc_decision['status'], gc_decision['reason'], process_classification, process_summary
 
     def _classify_process(self, p, podName: str) -> Dict:
         """
@@ -390,7 +396,7 @@ class ProcessManager:
 
         # 증가량(delta) 계산
         prev = prev_states[p.pid]
-        deltas = self._calculateDeltas(p, prev)
+        deltas = self.ㅋ_calculateDeltas(p, prev)
 
         # 2. Running/Uninterruptible 프로세스는 활성
         if p.state in ProcessStatePolicy.ACTIVE_STATES:
@@ -479,19 +485,21 @@ class ProcessManager:
             'io_delta': deltas['io_bytes']
         }
 
-    def _make_gc_decision(self, summary: dict, pod_name, current_time) -> Dict:
+    def _decideActivityStatus(self, summary: dict, pod_name, current_time) -> Dict:
         """
-        프로세스 분석 결과를 바탕으로 GC 결정
+        프로세스 분석 결과를 바탕으로 활성 상태 판단
         Return:
             GC 결정 결과: dict
+            - status: enum
+            - reason: str
         """
-        # 1. 활성 프로세스가 있으면 유지
+        # 1. 활성 프로세스가 있으면 활성
         if summary['active'] > 0:
             if pod_name in self.podInactiveSince:
                 self.podInactiveSince.pop(pod_name, None)
             print(f"{summary['active']} pods active")
             return{
-                'should_gc': False,
+                'status': PodActivityStatus.ACTIVE,
                 'reason': f"Pod has {summary['active']} active process(es)"
             }
 
@@ -503,7 +511,7 @@ class ProcessManager:
                 reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD / 60:.0f} min)"
                 print(reason)
                 return {
-                    'should_gc': True,
+                    'status': PodActivityStatus.GC,
                     'reason': reason
                 }
             else:
@@ -512,14 +520,14 @@ class ProcessManager:
                 reason = f"All processes inactive, waiting {remain / 60:.1f} more min to GC"
                 print(reason)
                 return {
-                    'should_gc': False,
+                    'status': PodActivityStatus.INACTIVE,
                     'reason': reason
                 }
 
         # 3. 기본적으로 GC하지 않음
         print(f"Default, and summary\n{summary}")
         return{
-            'should_gc': False,
+            'status': PodActivityStatus.INACTIVE,
             'reason': f"Pod has {summary['inactive']} inactive process"
         }
 
