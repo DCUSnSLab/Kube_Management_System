@@ -1,7 +1,4 @@
-import dataclasses
-import os
 from datetime import datetime
-import csv
 from enum import Enum
 from typing import Dict, Optional
 from process import CgroupMetrics, ProcessMetrics, Process, Mode_State, Policy_State
@@ -9,16 +6,12 @@ from process import CgroupMetrics, ProcessMetrics, Process, Mode_State, Policy_S
 from kubernetes import client, config, stream
 import time
 
+
 class ProcessStateClassification(Enum):
     """프로세스 상태 분류"""
-    ACTIVE = "active"          # 활성 프로세스
-    INACTIVE = "inactive"      # 비활성 프로세스
+    ACTIVE = "active"  # 활성 프로세스
+    INACTIVE = "inactive"  # 비활성 프로세스
 
-class PodActivityStatus(Enum):
-    """프로세스 상태 기반 파드 활성 유무 결정"""
-    ACTIVE = "active"          # 활성 상태 (활성 프로세스가 1개이상 있음)
-    INACTIVE = "inactive"      # 비활성 상태 (프로세스 모두 비활성)
-    GC = "gc"                  # GC 대상 (비활성 상태 특정 시간동안 지속)
 
 class ProcessStatePolicy:
     """프로세스 상태 분류 기준"""
@@ -27,11 +20,10 @@ class ProcessStatePolicy:
     IDLE_STATES: dict = {'Sleeping', 'Stopped'}
     INACTIVE_STATES: dict = {'Zombie', 'Dead'}
     # CPU 자원 관련 지표(변화률 기반)
-    CPU_TIME_DELTA_THRESHOLD = 215                      # CPU time(stime + utime) 임계치, jiffies(틱) 단위
-    VOLUNTARY_CTXT_SWITCH_DELTA_THRESHOLD = 716         # Voluntary Context Switch 임계치
-    NON_VOLUNTARY_CTXT_SWITCH_DELTA_THRESHOLD = 158     # Non-Voluntary Context Switch 임계치
-    # 예: N=5분, 특정 시간동안 비활성일 경우 GC 대상으로 변경
-    INACTIVE_DURATION_THRESHOLD = 5 * 60
+    CPU_TIME_DELTA_THRESHOLD = 215  # CPU time(stime + utime) 임계치, jiffies(틱) 단위
+    VOLUNTARY_CTXT_SWITCH_DELTA_THRESHOLD = 716  # Voluntary Context Switch 임계치
+    NON_VOLUNTARY_CTXT_SWITCH_DELTA_THRESHOLD = 158  # Non-Voluntary Context Switch 임계치
+
 
 class ProcessManager:
     def __init__(self, api_instance, pod):
@@ -40,7 +32,7 @@ class ProcessManager:
         self.namespace: str = pod.metadata.namespace
 
         self.previous_states: dict = {}  # pod별 이전 통계 저장하는 딕셔너리
-        self.podInactiveSince: Dict[str, float] = {}   # pod 비활성 시작 시간 저장 (name, time)
+        self.podInactiveSince: Dict[str, float] = {}  # pod 비활성 시작 시간 저장 (name, time)
         self.time = time
 
     def getPorcessData(self):
@@ -314,15 +306,11 @@ class ProcessManager:
         """
         return:
         분석결과
-          - isActive(gc여부): bool
-          - reason(gc이유): str
           - detailed_classification(프로세스 분류 정보): dict
           - process_summary(프로세스 요약정보): dict
         """
         if not processes:
-            return{
-                'isActive': False,
-                'reason': 'no processes found',
+            return {
                 'detailed_classification': {},
                 'process_summary': {}
             }
@@ -332,9 +320,9 @@ class ProcessManager:
         process_classification: list = []
         process_summary: dict = {
             'total': len(processes),
-            'active': 0,            # 활성
-            'inactive': 0,          # 비활성
-            'zombie': 0,            # 좀비
+            'active': 0,  # 활성
+            'inactive': 0,  # 비활성
+            'zombie': 0,  # 좀비
         }
         for process in processes:
             classification = self._classify_process(process, pod_name)
@@ -353,10 +341,7 @@ class ProcessManager:
         # 현재 CPU 통계 저장
         self._updateState(pod_name, processes, current_time)
 
-        # GC 여부 결정
-        gc_decision = self._decideActivityStatus(process_summary, pod_name, current_time)
-
-        return gc_decision['status'], gc_decision['reason'], process_classification, process_summary
+        return process_classification, process_summary
 
     def _classify_process(self, p, podName: str) -> Dict:
         """
@@ -400,7 +385,7 @@ class ProcessManager:
 
         # 2. Running/Uninterruptible 프로세스는 활성
         if p.state in ProcessStatePolicy.ACTIVE_STATES:
-           return self._makeActiveResult(p, 'Running_state', deltas)
+            return self._makeActiveResult(p, 'Running_state', deltas)
 
         # 3. CPU delta 체크
         if deltas['CPUtime'] >= ProcessStatePolicy.CPU_TIME_DELTA_THRESHOLD:
@@ -421,7 +406,7 @@ class ProcessManager:
             return self._makeActiveResult(p, 'minflt_increase', deltas)
 
         # 6. 비활성
-        return{
+        return {
             'pid': p.pid,
             'comm': p.comm,
             'state': ProcessStateClassification.INACTIVE,
@@ -442,7 +427,7 @@ class ProcessManager:
             이전 계산 값이 없을 경우 None 반환
         """
         deltas = {}
-        deltas['CPUtime'] = (p.utime + p.stime) - (prev.get('utime', 0) + prev.get('stime',0))
+        deltas['CPUtime'] = (p.utime + p.stime) - (prev.get('utime', 0) + prev.get('stime', 0))
         deltas['voluntary_ctxt'] = p.metrics.voluntary_ctxt_switches - prev.get('voluntary_ctxt', 0)
         deltas['nonvoluntary_ctxt'] = p.metrics.nonvoluntary_ctxt_switches - prev.get('nonvoluntary_ctxt', 0)
         deltas['rss'] = (p.rss or 0) - prev.get('rss', 0)
@@ -472,7 +457,7 @@ class ProcessManager:
             }
 
     def _makeActiveResult(self, p, reason: str, deltas) -> dict:
-        return{
+        return {
             'pid': p.pid,
             'comm': p.comm,
             'state': ProcessStateClassification.ACTIVE,
@@ -483,52 +468,6 @@ class ProcessManager:
             'rss_delta': deltas['rss'],
             'minflt_delta': deltas['minflt'],
             'io_delta': deltas['io_bytes']
-        }
-
-    def _decideActivityStatus(self, summary: dict, pod_name, current_time) -> Dict:
-        """
-        프로세스 분석 결과를 바탕으로 활성 상태 판단
-        Return:
-            GC 결정 결과: dict
-            - status: enum
-            - reason: str
-        """
-        # 1. 활성 프로세스가 있으면 활성
-        if summary['active'] > 0:
-            if pod_name in self.podInactiveSince:
-                self.podInactiveSince.pop(pod_name, None)
-            print(f"{summary['active']} pods active")
-            return{
-                'status': PodActivityStatus.ACTIVE,
-                'reason': f"Pod has {summary['active']} active process(es)"
-            }
-
-        # 2. 모든 프로세스가 비활성이면 GC 여부 확인을 위해 비활성 상태 유지 시간 확인
-        if summary['inactive'] == summary['total']:
-            self.podInactiveSince.setdefault(pod_name, current_time)
-            inactive_elapsed = current_time - self.podInactiveSince[pod_name]
-            if inactive_elapsed >= ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD:
-                reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD / 60:.0f} min)"
-                print(reason)
-                return {
-                    'status': PodActivityStatus.GC,
-                    'reason': reason
-                }
-            else:
-                # 아직 임계시간 미도달
-                remain = ProcessStatePolicy.INACTIVE_DURATION_THRESHOLD - inactive_elapsed
-                reason = f"All processes inactive, waiting {remain / 60:.1f} more min to GC"
-                print(reason)
-                return {
-                    'status': PodActivityStatus.INACTIVE,
-                    'reason': reason
-                }
-
-        # 3. 기본적으로 GC하지 않음
-        print(f"Default, and summary\n{summary}")
-        return{
-            'status': PodActivityStatus.INACTIVE,
-            'reason': f"Pod has {summary['inactive']} inactive process"
         }
 
 if __name__ == "__main__":

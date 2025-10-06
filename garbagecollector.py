@@ -63,12 +63,12 @@ class GarbageCollector():
                 p_obj.insertPodInfo()
                 p_obj.saveProcessDataToDB()
 
-                should_gc, gc_reason, type = p_obj.shouldGarbageCollection()
+                should_gc, gc_reason, cause = p_obj.shouldGarbageCollection()
 
                 if should_gc is True:
                     print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
                     print(f"  Reason: {gc_reason}")
-                    print(f"  Type: {type}")
+                    print(f"  Type: {cause}")
                     p_obj.insert_DeleteReason(gc_reason)
                     p_obj.save_DeleteReason_to_DB()
                     self.deletePod(p_name)  # pod 삭제

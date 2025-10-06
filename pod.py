@@ -1,4 +1,6 @@
 import csv
+from enum import Enum
+
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from historyManager import HistoryManager
 from processManager import ProcessManager
@@ -13,7 +15,7 @@ from DB_postgresql import (
     is_deleted_in_DB, is_exist_in_DB
 )
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 # pod.py 맨 위 import 근처에 추가
 import threading
 from collections import defaultdict
@@ -45,7 +47,17 @@ def _need_write_header_once(fname: str) -> bool:
         _HEADER_WRITTEN.add(fname)
         return need
 
-class Pod():
+class PodActivityStatus(Enum):
+    """프로세스 상태 기반 파드 활성 유무 결정"""
+    ACTIVE = "active"          # 활성 상태 (활성 프로세스가 1개이상 있음)
+    INACTIVE = "inactive"      # 비활성 상태 (프로세스 모두 비활성)
+    GC = "gc"                  # GC 대상 (비활성 상태 특정 시간동안 지속)
+
+class PodActivityPolicy:
+    # 예: N=5분, 특정 시간동안 비활성일 경우 GC 대상으로 변경
+    INACTIVE_DURATION_THRESHOLD = 5 * 60
+
+class Pod:
     def __init__(self, api, pod):
         self.api = api
         self.pod = pod
@@ -63,6 +75,7 @@ class Pod():
         self.isActiveResultCommandHistory: bool = None
         self.isActiveResultProcess: bool = None
         self.processStateDescription: str = None
+        self.podInactiveSince: dict[str, float] = {}  # pod 비활성 시작 시간 저장 (name, time)
 
         # Pod 클래스 내부(클래스 변수)로 두면 좋습니다.
         self.PROCESS_HEADERS = [
@@ -81,10 +94,10 @@ class Pod():
         ]
 
         self.CLASSIFICATION_KEYS_ORDER = [
-            "pod_name", "timestamp", "pid", "comm", "role", "state", "score", "reason"
+            "experiment_id", "pod_name", "timestamp", "pid", "comm", "state", "reason", "CPUtime_delta", "ctxt_delta", "non_ctxt_delta", "rss_delta", "minflt_delta", "io_delta"
         ]
         self.SUMMARY_KEYS_ORDER = [
-            "pod_name", "timestamp", "total", "active_cnt", "inactive_cnt", "gc_candidates_cnt", "zombie_cnt"
+            "experiment_id", "pod_name", "timestamp", "status", "description", "total", "active", "inactive", "zombie"
         ]
 
     def getTimestamp(self):
@@ -95,9 +108,8 @@ class Pod():
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
         self.insertPodLifecycle()
         self.insertPodInfo()
-        self.savePodLiftcycleToDB()
+        self.savePodLifecycleToDB()
         self.savePodInfoToDB()
-
 
     def isDeletedInDB(self):
         """Pod이 삭제되었는지 DB에서 확인"""
@@ -143,7 +155,7 @@ class Pod():
         pl.createTime = self.pod.metadata.creation_timestamp
         self.pod_lifecycle = pl
 
-    def savePodLiftcycleToDB(self):
+    def savePodLifecycleToDB(self):
         """Pod's lifecycle save to DB"""
         save_pod_lifecycle(self.podName, self.namespace, self.pod_lifecycle)
 
@@ -169,7 +181,8 @@ class Pod():
 
     def isActiveFromHistory(self) -> bool:
         """
-        retrn True
+        return True or False
+            7일 이상 경과시 비활성 -> False
         """
         result = self.hm.analyze(self.timeBashHistory)
         print(result)
@@ -213,17 +226,49 @@ class Pod():
         return result
 
     def isActiveFromProcess(self, experiment_id=0):
-        self.isActiveResultProcess, self.processStateDescription, classification, summary = self.pm.analyzePodProcess(self.processes)
+        classification, summary = self.pm.analyzePodProcess(self.processes)
+
+        # 1. 활성 프로세스가 있으면 활성
+        current_time = time.time()
+        if summary['active'] > 0:
+            if self.podName in self.podInactiveSince:
+                self.podInactiveSince.pop(self.podName, None)
+            status = PodActivityStatus.ACTIVE
+            reason = f"Pod has {summary['active']} active process(es)"
+
+        # 2. 모든 프로세스가 비활성이면 GC 여부 확인을 위해 비활성 상태 유지 시간 확인
+        elif summary['inactive'] == summary['total']:
+            self.podInactiveSince.setdefault(self.podName, current_time)
+            inactive_elapsed = current_time - self.podInactiveSince[self.podName]
+            if inactive_elapsed >= PodActivityPolicy.INACTIVE_DURATION_THRESHOLD:
+                status = PodActivityStatus.GC
+                reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {PodActivityPolicy.INACTIVE_DURATION_THRESHOLD / 60:.0f} min)"
+            else:
+                remain = PodActivityPolicy.INACTIVE_DURATION_THRESHOLD - inactive_elapsed
+                status = PodActivityStatus.INACTIVE
+                reason = f"All processes inactive, waiting {remain / 60:.1f} more min to GC"
+
+        # 3. 기본적으로 GC하지 않으며, 비활성 상태로 간주 (활성 프로세스가 없으므로)
+        else:
+            status = PodActivityStatus.INACTIVE
+            reason = f"Pod has {summary['inactive']} inactive process"
+
+        # gc 대상이 아닐 경우 True, gc 대상일 경우 False
+        self.isActiveResultProcess = (status != PodActivityStatus.GC)
+        self.processStateDescription = reason
 
         timestamp = self.getTimestamp()
         self.saveStatDataToCSV(timestamp, experiment_id)
         # self.saveCgroupMetricsToCSV(cgroups, timestamp, experiment_id)
         self.saveClassificationToCsv(classification, self.podName, experiment_id)
+        summary["status"] = status.value
+        summary["description"] = reason
         self.saveSummaryToCsv(summary, self.podName, experiment_id)
+
         return self.isActiveResultProcess
 
     def printProcList(self):
-        print('-'*50)
+        print('-' * 50)
         for p in self.processes:
             print(p.comm, p.state, p.pid, p.ppid, p.policy)
         print('-' * 50)
@@ -371,7 +416,6 @@ class Pod():
         """
         분류한 딕셔너리와 분류 결과 요약한 딕셔너리를 csv로 저장
         classification: 프로세스별 분석 결과
-        summary: 프로세스 분석 결과 요약 (active, idle 등 분류 결과를 요약)
         """
         if not classification:
             return
@@ -387,6 +431,7 @@ class Pod():
         # 스키마 고정: 필요한 키만 뽑고, 없으면 빈칸
         def _row_from(proc: dict):
             base = {
+                "experiment_id": experiment_id,
                 "pod_name": pod_name,
                 "timestamp": ts
             }
@@ -414,7 +459,11 @@ class Pod():
 
         ts = self.getTimestamp()
         # 고정 키 순서에 맞춰 값 매핑
-        base = {"pod_name": pod_name, "timestamp": ts}
+        base = {
+            "experiment_id": experiment_id,
+            "pod_name": pod_name,
+            "timestamp": ts
+        }
         base.update(summary)
 
         with lock, open(filename, "a", newline="", encoding="utf-8") as f:
@@ -442,7 +491,7 @@ class Pod():
         # 3. 판단
         if not self.isActiveResultCommandHistory:
             return True, 'No usage history for more than a week', 'history'
-        if self.isActiveResultProcess:
+        if not self.isActiveResultProcess:
             return True, self.processStateDescription, 'process'
         else:
             return False, 'active', None
