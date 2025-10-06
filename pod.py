@@ -247,7 +247,7 @@ class Pod:
             else:
                 remain = PodActivityPolicy.INACTIVE_DURATION_THRESHOLD - inactive_elapsed
                 status = PodActivityStatus.INACTIVE
-                reason = f"All processes inactive, waiting {remain / 60:.1f} more min to GC"
+                reason = f"All processes inactive. waiting {remain / 60:.1f} more min to GC"
 
         # 3. 기본적으로 GC하지 않으며, 비활성 상태로 간주 (활성 프로세스가 없으므로)
         else:
