@@ -1,3 +1,5 @@
+from typing import Dict
+
 from kubernetes import client, config, utils
 import time
 from datetime import datetime, timezone, timedelta
@@ -69,6 +71,109 @@ class Generator:
                 ]
             }
         }
+    def _sample_interarrival_seconds(self, rate_per_min: float) -> float:
+        # rate per min : 분당 평균 도착률 G, ex) 6 -> 분당 6개
+        if rate_per_min <= 0:
+            return 0.0
+        rate_per_sec = rate_per_min / 60.0
+        return random.expovariate(rate_per_sec)
+
+    # 하나의 실험 주기에서 상태의 분포를 설정하고, 해상 상태분포에 따라 상태 리턴
+    # state_mix = {"active": 0.4, "running": 0.35, "background": 0.15, "idle": 0.10}
+    def _sample_state(self, state_mix: Dict[str, float]) -> str:
+        states = list(state_mix.keys())
+        weights = list(state_mix.values())
+        # 정규화 안전장치
+        total = sum(w for w in weights if w > 0)
+        if total <= 0:
+            states, weights = ["idle"], [1.0]
+        else:
+            weights = [w / total for w in weights]
+        return random.choices(states, weights=weights, k=1)[0]
+
+    def run_poisson(self,
+                           duration_s: int = 3600,  # 한 사이클 전체 실험 길이
+                           generate_until_min: int = 20,  # 생성 구간: 앞 X분까지만 생성
+                           rate_per_min: float = 6.0  # 포아송 생성률(분당 G)
+                           ):
+
+        # 생성 구간(초)
+        generate_until_s = max(0, min(duration_s, int(generate_until_min * 60)))
+
+        # GC 프로세스 시작
+        self.gc_process.start()
+
+        try:
+            # ===== 전체 실험 반복 =====
+            while self.count < self.times:
+                created = 0
+                cycle_start = time.time()
+                creation_end_ts = cycle_start + generate_until_s
+                cycle_end_ts = cycle_start + duration_s
+
+                print(f"\n\n====== Start cycle #{self.count + 1}/{self.times} "
+                      f"(total {duration_s}s, generate first {generate_until_s}s) ======\n")
+
+                # 생성 구간
+                next_arrival_ts = cycle_start + self._sample_interarrival_seconds(rate_per_min)
+                while True:
+                    # 중단 조건
+                    if hasattr(self, "stop_event") and self.stop_event.is_set():
+                        print("[POISSON] stop_event set. exit creation window.")
+                        break
+
+                    now = time.time()
+                    if now >= creation_end_ts:
+                        print("[POISSON] creation window ended.")
+                        break
+
+                    # 다음 도착까지 대기
+                    sleep_for = max(0.0, next_arrival_ts - now)
+                    if sleep_for > 0:
+                        time.sleep(sleep_for)
+
+                    # 파드 생성
+                    try:
+                        print(f"[POISSON] + createPod at {datetime.now():%H:%M:%S}")
+                        self.createPod(1, 1, 1, 1)  # active/idle/running/background_active
+                        created += 1
+                    except Exception as e:
+                        print(f"[POISSON] createPod error: {e}")
+
+                    # 다음 도착 예약
+                    next_arrival_ts = time.time() + self._sample_interarrival_seconds(rate_per_min)
+
+                # 유지 구간
+                print(f"[POISSON] holding until end of {duration_s / 60:.1f} min cycle ...")
+                while True:
+                    if hasattr(self, "stop_event") and self.stop_event.is_set():
+                        print("[POISSON] stop_event set. exit hold window.")
+                        break
+                    if time.time() >= cycle_end_ts:
+                        print("[POISSON] cycle duration reached.")
+                        break
+                    time.sleep(0.2)
+
+                # 삭제 단계
+                print("[POISSON] Deleting all pods...")
+                self.deletePod()
+                while True:
+                    if self.checkStatus():
+                        break
+                    print("Deleting pod ------")
+                    time.sleep(1)
+
+                # 사이클 종료
+                self.count += 1
+                print(f"[POISSON] Cycle #{self.count} finished. created_pods={created}")
+
+        except KeyboardInterrupt:
+            print("Keyboard Interrupted. Cleaning up...")
+            self.deletePod()
+        finally:
+            if self.gc_process.is_alive():
+                self.stop_event.set()
+                self.gc_process.join()
 
     def run(self):
         """
@@ -349,7 +454,8 @@ class Generator:
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
     generator = Generator()
-    generator.experimentDataCollection()
+    #generator.experimentDataCollection()
+    generator.run()
     # generator.deletePod()
     # while True:
     #     if generator.checkStatus():
