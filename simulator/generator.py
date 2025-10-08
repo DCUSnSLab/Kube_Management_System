@@ -71,6 +71,7 @@ class Generator:
                 ]
             }
         }
+
     def _sample_interarrival_seconds(self, rate_per_min: float) -> float:
         # rate per min : 분당 평균 도착률 G, ex) 6 -> 분당 6개
         if rate_per_min <= 0:
@@ -94,13 +95,14 @@ class Generator:
     def run_poisson(self,
                            duration_s: int = 3600,  # 한 사이클 전체 실험 길이
                            generate_until_min: int = 20,  # 생성 구간: 앞 X분까지만 생성
-                           rate_per_min: float = 6.0  # 포아송 생성률(분당 G)
+                           rate_per_min: float = 6.0,  # 포아송 생성률(분당 G)
+                           inactive_threshold_s: int = 300
                            ):
 
         # 생성 구간(초)
         generate_until_s = max(0, min(duration_s, int(generate_until_min * 60)))
 
-        # GC 프로세스 시작
+        # GC 프로세스 시작 TODO: inactive_threashold 전달 필요
         self.gc_process.start()
 
         try:
@@ -109,7 +111,8 @@ class Generator:
                 created = 0
                 cycle_start = time.time()
                 creation_end_ts = cycle_start + generate_until_s
-                cycle_end_ts = cycle_start + duration_s
+                base_cycle_end_ts = cycle_start + duration_s  # 기본 종료시각(1시간)
+                last_creation_ts = None
 
                 print(f"\n\n====== Start cycle #{self.count + 1}/{self.times} "
                       f"(total {duration_s}s, generate first {generate_until_s}s) ======\n")
@@ -143,13 +146,22 @@ class Generator:
                     # 다음 도착 예약
                     next_arrival_ts = time.time() + self._sample_interarrival_seconds(rate_per_min)
 
+                # 유지구간 종료시간 계산 - 마지막 생성이 없었다면 생성구간 종료시점을 기준으로 유지 임계값 적용
+                anchor_ts = last_creation_ts if last_creation_ts is not None else creation_end_ts
+                # 마지막 임계 시간+300초 더 추가함 5분더 시뮬레이터가 진행할 수 있도록, 300초는 없애도 되고 줄여도됨
+                hold_until_ts = max(base_cycle_end_ts, anchor_ts + max(0, inactive_threshold_s + 300))
+
+                print(f"[POISSON] holding until "
+                      f"{int(hold_until_ts - time.time())}s from now "
+                      f"(base_end={int(base_cycle_end_ts - time.time())}s, "
+                      f"last+thr={int(anchor_ts + inactive_threshold_s - time.time())}s).")
+
                 # 유지 구간
-                print(f"[POISSON] holding until end of {duration_s / 60:.1f} min cycle ...")
                 while True:
                     if hasattr(self, "stop_event") and self.stop_event.is_set():
                         print("[POISSON] stop_event set. exit hold window.")
                         break
-                    if time.time() >= cycle_end_ts:
+                    if time.time() >= hold_until_ts:
                         print("[POISSON] cycle duration reached.")
                         break
                     time.sleep(0.2)
