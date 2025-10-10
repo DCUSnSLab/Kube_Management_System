@@ -27,71 +27,75 @@ class GarbageCollector():
             self.namespace = 'gc-simulator'
 
         start_anchor = time.perf_counter()  # 고정 기준 시각
-        while True:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"{timestamp} Update Pod List...")
+        try:
+            while True:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"{timestamp} Update Pod List...")
 
-            # 목표 시각 계산 (fixed-rate)
-            target_time = start_anchor + (self.count * interval)
+                # 목표 시각 계산 (fixed-rate)
+                target_time = start_anchor + (self.count * interval)
 
-            self.getPodList()
-            print('='*10+f"Start to Check Data {self.count} times"+'='*10)
+                self.getPodList()
+                print('=' * 10 + f"Start to Check Data {self.count} times" + '=' * 10)
 
-            # 시간 측정
-            start_ts = time.perf_counter()
-            now_wall = timestamp
-            print(f"[TIMING] Collecting Pod Data... for {len(self.podlist)} pods with {worker} workers "
-                  f"at {now_wall} (perf_counter={start_ts:.3f}s)")
+                # 시간 측정
+                start_ts = time.perf_counter()
+                now_wall = timestamp
+                print(f"[TIMING] Collecting Pod Data... for {len(self.podlist)} pods with {worker} workers "
+                      f"at {now_wall} (perf_counter={start_ts:.3f}s)")
 
-            futures = []
-            with ThreadPoolExecutor(max_workers=worker) as executor:
-                for p_name in self.podlist.keys():
-                    pod = self.podlist[p_name]
-                    futures.append(executor.submit(pod.collectProcessAndHistory))
+                futures = []
+                with ThreadPoolExecutor(max_workers=worker) as executor:
+                    for p_name in self.podlist.keys():
+                        pod = self.podlist[p_name]
+                        futures.append(executor.submit(pod.collectProcessAndHistory))
 
-                for fut in as_completed(futures):
-                    try:
-                        _ = fut.result()
-                    except Exception as e:
-                        print(f"[WARN] Fail to collect status for a pod: {e}")
-            elapsed = time.perf_counter() - start_ts
-            print(f"[TIMING] Collected statuses for {len(self.podlist)} pods [{elapsed:.3f}s]")
+                    for fut in as_completed(futures):
+                        try:
+                            _ = fut.result()
+                        except Exception as e:
+                            print(f"[WARN] Fail to collect status for a pod: {e}")
+                elapsed = time.perf_counter() - start_ts
+                print(f"[TIMING] Collected statuses for {len(self.podlist)} pods [{elapsed:.3f}s]")
 
-            for p_name, p_obj in self.podlist.items():
-                print(p_name)
-                # save logging data
-                p_obj.insertPodInfo()
-                p_obj.saveProcessDataToDB()
+                for p_name, p_obj in self.podlist.items():
+                    print(p_name)
+                    # save logging data
+                    p_obj.insertPodInfo()
+                    p_obj.saveProcessDataToDB()
 
-                should_gc, gc_reason, cause = p_obj.shouldGarbageCollection()
+                    should_gc, gc_reason, cause = p_obj.shouldGarbageCollection()
 
-                if should_gc is True:
-                    print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
-                    print(f"  Reason: {gc_reason}")
-                    print(f"  Type: {cause}")
-                    p_obj.insert_DeleteReason(gc_reason)
-                    p_obj.save_DeleteReason_to_DB()
-                    self.deletePod(p_name)  # pod 삭제
+                    if should_gc:
+                        print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
+                        print(f"  Reason: {gc_reason}")
+                        print(f"  Type: {cause}")
+                        p_obj.insert_DeleteReason(gc_reason)
+                        p_obj.save_DeleteReason_to_DB()
+                        self.deletePod(p_name)  # pod 삭제
 
-                print('-' * 50)
+                    print('-' * 50)
 
-            self.count += 1
-            if self._stop_event.is_set():
-                break
+                self.count += 1
+                if self._stop_event.is_set():
+                    break
 
-            now = time.perf_counter()
-            sleep_time = target_time - now
-            if sleep_time > 0:
-                # 종료 예정 시각 (UTC 기준)
-                wakeup_wall = datetime.now(timezone.utc) + timedelta(seconds=sleep_time)
-                print(f"[SLEEP] Sleeping {sleep_time:.2f}s "
-                      f"(until {wakeup_wall.strftime('%Y-%m-%d %H:%M:%S %Z')})")
-                time.sleep(sleep_time)
-            else:
-                # 오버런: 작업이 60초를 넘김 -> 드리프트 경고만 하고 바로 다음 회차 진행
-                print(f"[DRIFT] Overran by {-sleep_time:.3f}s; skipping sleep to realign")
+                now = time.perf_counter()
+                sleep_time = target_time - now
+                if sleep_time > 0:
+                    # 종료 예정 시각 (UTC 기준)
+                    wakeup_wall = datetime.now(timezone.utc) + timedelta(seconds=sleep_time)
+                    print(f"[SLEEP] Sleeping {sleep_time:.2f}s "
+                          f"(until {wakeup_wall.strftime('%Y-%m-%d %H:%M:%S %Z')})")
+                    time.sleep(sleep_time)
+                else:
+                    # 오버런: 작업이 60초를 넘김 -> 드리프트 경고만 하고 바로 다음 회차 진행
+                    print(f"[DRIFT] Overran by {-sleep_time:.3f}s; skipping sleep to realign")
 
-        print("Garbage Collector Stopped")
+        except KeyboardInterrupt:
+            print("\n[INFO] Garbage Collector interrupted by user. Shutting down gracefully...")
+        finally:
+            print("Garbage Collector Stopped")
 
     def getPodList(self):
         #현재 네임스테이스의 Pod 목록을 가져옴

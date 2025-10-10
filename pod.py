@@ -173,6 +173,8 @@ class Pod:
         if self.pod_lifecycle is None:
             self.pod_lifecycle = Pod_Lifecycle()
         """When pod deleted, save time and because of pod deleted"""
+        if reason is None:
+            reson = "No reason - UNKNOWN"
         self.pod_lifecycle.reason_deletion = reason
         self.pod_lifecycle.deleteTime = self.getTimestamp()
 
@@ -274,7 +276,7 @@ class Pod:
         summary["status"] = status.value
         summary["description"] = reason
         self.saveSummaryToCsv(summary, self.podName, experiment_id)
-
+        print("Pod status:", summary["status"])
         return self.isActiveResultProcess
 
     def printProcList(self):
@@ -368,6 +370,10 @@ class Pod:
         """Save Pod's process data to DB"""
         timestamp = self.getTimestamp()
         processes = []
+
+        if not self.processes:
+            print(f"[WARN] No process data found for pod {self.podName}. Skipping DB save.")
+            return
 
         for process in self.processes:
             processes.append({

@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def run_gc(ns, sc):
-    gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
+    gc = GarbageCollector(namespace=ns, isDev=True, stop_event=sc)
     gc.manage()
 
 
@@ -25,7 +25,7 @@ class Generator:
         self.namespace: str = namespace
         self.pod_list: dict = {}
         self.intervalTime = 120  # pod 생성 반복 주기
-        self.times = 10  # 반복할 횟수
+        self.times = 1  # 반복할 횟수
         self.count = 0  # 반복한 횟수
         self.active = 0  # active pods
         self.idle = 0  # idle pods
@@ -140,7 +140,10 @@ class Generator:
                     # 파드 생성
                     try:
                         print(f"[POISSON] + createPod at {datetime.now():%H:%M:%S}")
-                        self.createPod(1, 1, 1, 1)  # active/idle/running/background_active
+                        total = random.randint(4, 6)
+                        active, idle = self.generateRandomNumber(total, 2)
+                        active, running, bg_active = self.generateRandomNumber(active, 3)
+                        self.createPod(active, idle, running, bg_active)  # active, idle, running, background
                         created += 1
                     except Exception as e:
                         print(f"[POISSON] createPod error: {e}")
@@ -329,9 +332,9 @@ class Generator:
         # active pod
         ac += self.active  # 현재 파드의 수 + 생성할 파드의 수
         while self.active < ac:
-            self.pod_manifest['metadata']['name'] = 'experiment-active-'+str(self.active)
+            self.pod_manifest['metadata']['name'] = 'active-'+str(self.active)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'active'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '3'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             print('active pod', self.active, ' created')
@@ -340,7 +343,7 @@ class Generator:
         # idle pod
         idle += self.idle
         while self.idle < idle:
-            self.pod_manifest['metadata']['name'] = 'experiment-idle-' + str(self.idle)
+            self.pod_manifest['metadata']['name'] = 'idle-' + str(self.idle)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'idle'
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
 
@@ -351,9 +354,9 @@ class Generator:
         # running pod
         run += self.running
         while self.running < run:
-            self.pod_manifest['metadata']['name'] = 'experiment-running-' + str(self.running)
+            self.pod_manifest['metadata']['name'] = 'running-' + str(self.running)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'running'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             print('running pod', self.running, ' created')
@@ -362,9 +365,9 @@ class Generator:
         # background active pod
         bg += self.bg_active
         while self.bg_active < bg:
-            self.pod_manifest['metadata']['name'] = 'experiment-background-ac-' + str(self.bg_active)
+            self.pod_manifest['metadata']['name'] = 'background-ac-' + str(self.bg_active)
             next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'PROCESS_STATE')['value'] = 'background_active'
-            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '2'
+            next(env for env in self.pod_manifest['spec']['containers'][0]['env'] if env['name'] == 'NUM_PROCS')['value'] = '1'
 
             self.coreV1.create_namespaced_pod(namespace=self.namespace, body=self.pod_manifest)
             print('background active pod', self.bg_active, ' created')
@@ -386,28 +389,33 @@ class Generator:
             print(f"{state} pod {count} created")
             count += 1
 
-    def generateRandomNumber(self, total, numCreate=2, min_ratio=0.7, max_ratio=0.9):
+    def generateRandomNumber(self, total, numCreate=2, active_ratio=0.9):
         """
         랜덤 숫자 생성 (비율에 맞게 생성)
+        - numCreate == 2 : active:idle = 약 0.9 : 0.1
+        - numCreate >= 3 : active, running, background, idle = 0.5, 0.25, 0.15, 0.10
         """
         if numCreate < 2:
             return total
 
         if numCreate == 2:
-            a = int(total * random.uniform(min_ratio, max_ratio))
+            a = int(total * active_ratio)
             b = total - a
             return a, b
 
         else:
-            # 비율 나누기 (0 ~ 1)
-            parts = [random.random() for _ in range(numCreate)]
-            s = sum(parts)
-            numbers = [int(total * p / s) for p in parts]
-
-            # 합이랑 맞추기 위해 보정
+            # # 비율 나누기 (0 ~ 1)
+            # parts = [random.random() for _ in range(numCreate)]
+            # s = sum(parts)
+            # numbers = [int(total * p / s) for p in parts]
+            #
+            # # 합이랑 맞추기 위해 보정
+            # diff = total - sum(numbers)
+            # numbers[-1] += diff
+            ratio_map = [0.5, 0.25, 0.25]  # active, running, background
+            numbers = [int(total * r) for r in ratio_map]
             diff = total - sum(numbers)
-            numbers[-1] += diff
-
+            numbers[-1] += diff  # 보정
             return numbers
 
     def waitForPodRunning(self, pods, interval=5):
@@ -470,7 +478,7 @@ if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
     generator = Generator()
     #generator.experimentDataCollection()
-    generator.run()
+    # generator.run()
     # generator.deletePod()
     # while True:
     #     if generator.checkStatus():
@@ -478,3 +486,4 @@ if __name__ == "__main__":
     #     print("Deleting pod ------")
     #     time.sleep(1)
     # generator.createPod()
+    generator.run_poisson()
