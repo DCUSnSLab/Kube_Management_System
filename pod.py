@@ -28,11 +28,14 @@ _FILE_LOCKS = defaultdict(threading.Lock)
 _HEADER_WRITTEN = set()
 _HEADER_WRITTEN_LOCK = threading.Lock()
 
+
 def _ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
+
 def _with_file_lock(fname: str):
     return _FILE_LOCKS[fname]
+
 
 def _need_write_header_once(fname: str) -> bool:
     """
@@ -48,15 +51,18 @@ def _need_write_header_once(fname: str) -> bool:
         _HEADER_WRITTEN.add(fname)
         return need
 
+
 class PodActivityStatus(Enum):
     """프로세스 상태 기반 파드 활성 유무 결정"""
     ACTIVE = "active"          # 활성 상태 (활성 프로세스가 1개이상 있음)
     INACTIVE = "inactive"      # 비활성 상태 (프로세스 모두 비활성)
     GC = "gc"                  # GC 대상 (비활성 상태 특정 시간동안 지속)
 
+
 class PodActivityPolicy:
     # 예: N=5분, 특정 시간동안 비활성일 경우 GC 대상으로 변경
     INACTIVE_DURATION_THRESHOLD = 5 * 60
+
 
 class Pod:
     def __init__(self, api, pod):

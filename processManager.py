@@ -93,22 +93,30 @@ class ProcessManager:
         풀 커맨드(cmdline)를 얻으려면 Pod 안의 /proc/[pid]/cmdline을 읽어야함
         """
         command = ["cat", f"/proc/{pid}/cmdline"]
-        exec_command = stream.stream(
-            self.v1.connect_get_namespaced_pod_exec,
-            self.pod.metadata.name,
-            self.namespace,
-            command=command,
-            stderr=True, stdin=False,
-            stdout=True, tty=False
-        )
-        return exec_command.replace("\x00", " ").strip()
+        try:
+            exec_command = stream.stream(
+                self.v1.connect_get_namespaced_pod_exec,
+                self.pod.metadata.name,
+                self.namespace,
+                command=command,
+                stderr=True, stdin=False,
+                stdout=True, tty=False
+            )
+            cmdline = exec_command.replace("\x00", " ").strip()
+
+            if not cmdline:
+                return ""
+
+        except Exception as e:
+            print(f"[ERROR] Failed to exec into Pod '{self.pod.metadata.name}': {e}")
+        return ""
 
     def insertProcessStatData(self, processStat) -> list[Process]:
         """get /proc/stat data amd split into 52"""
         processes = []
         if processStat is None:
             print(f"Skipping Pod '{self.pod.metadata.name}': Failed to retrieve process data.")
-            return
+            return []
 
         for line in processStat.splitlines():
             fields = line.split()
@@ -123,10 +131,8 @@ class ProcessManager:
             except ValueError:
                 print(f"Skipping invalid PID in line: {line}")
                 continue
-            try:
-                p.comm = self.getCmdlineInPod(p.pid)
-            except Exception as e:
-                print(f"Skipping full name of process: {e}")
+            p.comm = self.getCmdlineInPod(p.pid)
+            if not p.comm:
                 p.comm = fields[1].strip('()')
             try:
                 p.state = Mode_State[fields[2]].value
@@ -196,8 +202,8 @@ class ProcessManager:
         metrics = ProcessMetrics()
         pid = process.pid
 
+        # --- /proc/[pid]/status 읽기 (context switch + VmRSS) ---
         try:
-            # /proc/[pid]/status 읽기 (context switch + VmRSS)
             command = ["cat", f"/proc/{pid}/status"]
             exec_command = stream.stream(
                 self.v1.connect_get_namespaced_pod_exec,
@@ -214,10 +220,12 @@ class ProcessManager:
                 elif line.startswith("nonvoluntary_ctxt_switches:"):
                     metrics.nonvoluntary_ctxt_switches = int(line.split()[1])
                 elif line.startswith("VmRSS:"):
-                    # VmRSS 값은 kB 단위 → bytes로 변환
-                    metrics.vm_rss = int(line.split()[1]) * 1024
+                    metrics.vm_rss = int(line.split()[1]) * 1024  # kB → bytes
+        except Exception as e:
+            print(f"[WARN] Unexpected error reading /proc/{pid}/status (PID {pid}): {e}")
 
-            # /proc/[pid]/io 읽기 (I/O workload)
+        # --- /proc/[pid]/io 읽기 (I/O workload) ---
+        try:
             command = ["cat", f"/proc/{pid}/io"]
             exec_command = stream.stream(
                 self.v1.connect_get_namespaced_pod_exec,
@@ -233,9 +241,8 @@ class ProcessManager:
                     metrics.read_bytes = int(line.split()[1])
                 elif line.startswith("write_bytes:"):
                     metrics.write_bytes = int(line.split()[1])
-
         except Exception as e:
-            print(f"Error collecting metrics for PID {pid}: {e}")
+            print(f"[WARN] Unexpected error reading /proc/{pid}/io (PID {pid}): {e}")
 
         process.metrics = metrics
 

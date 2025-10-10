@@ -11,9 +11,11 @@ from pod import Pod
 from processManager import ProcessManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
 def run_gc(ns, sc):
     gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
     gc.manage()
+
 
 class Generator:
     def __init__(self, namespace: str = 'gc-simulator'):
@@ -462,6 +464,7 @@ class Generator:
             return True
         else:
             return False
+
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
