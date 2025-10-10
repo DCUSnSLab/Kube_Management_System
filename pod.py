@@ -22,6 +22,9 @@ import threading
 from collections import defaultdict
 import os
 
+# 모든 Pod 객체가 동일한 타임스탬프를 가지기 위함 (데이터 저장 파일명)
+_EXPERIMENT_SESSION_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 # 파일별 락 (동일 프로세스/스레드 간 보호)
 _FILE_LOCKS = defaultdict(threading.Lock)
 # 헤더 썼는지 빠르게 체크하기 위한 집합(프로세스 내 캐시)
@@ -287,50 +290,53 @@ class Pod:
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
 
-        file_name = os.path.join(log_dir, f"process_metrics_experiment{experiment_id}.csv")
-        lock = _with_file_lock(file_name)
+        basename = f"process_metrics_experiment{experiment_id}.csv"
+        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+
+        lock = _with_file_lock(filename)
 
         # 한 번의 atomic 구간으로 헤더/레코드 쓰기
-        with lock, open(file_name, mode="a", newline="", encoding="utf-8") as file:
-            # 헤더는 파일 최초 생성자만 기록
-            if _need_write_header_once(file_name):
-                file.write(",".join(self.PROCESS_HEADERS) + "\n")
+        with lock:
+            header_needed = (not os.path.exists(filename)) or (os.path.getsize(filename) == 0)
+            with open(filename, mode="a", newline="", encoding="utf-8") as file:
+                if header_needed:
+                    file.write(",".join(self.PROCESS_HEADERS) + "\n")
 
-            for process in self.processes:
-                stat_values = [
-                    self.podName, timestamp,
-                    str(process.pid), process.comm, process.state, str(process.ppid),
-                    str(process.pgrp), str(process.session), str(process.tty_nr),
-                    str(process.tpgid), str(process.flags), str(process.minflt),
-                    str(process.cminflt), str(process.majflt), str(process.cmajflt),
-                    str(process.utime), str(process.stime), str(process.cutime),
-                    str(process.cstime), str(process.priority), str(process.nice),
-                    str(process.num_threads), str(process.itrealvalue),
-                    str(process.starttime), str(process.vsize), str(process.rss),
-                    str(process.rsslim), str(process.startcode), str(process.endcode),
-                    str(process.startstack), str(process.kstkesp), str(process.kstkeip),
-                    str(process.signal), str(process.blocked), str(process.sigignore),
-                    str(process.sigcatch), str(process.wchan), str(process.nswap),
-                    str(process.cnswap), str(process.exit_signal), str(process.processor),
-                    str(process.rt_priority), str(process.policy), str(process.delayacct_blkio_ticks),
-                    str(process.guest_time), str(process.cguest_time), str(process.start_data),
-                    str(process.end_data), str(process.start_brk), str(process.arg_start),
-                    str(process.arg_end), str(process.env_start), str(process.env_end),
-                    str(process.exit_code)
-                ]
-
-                if process.metrics:
-                    metrics_values = [
-                        str(process.metrics.voluntary_ctxt_switches or ""),
-                        str(process.metrics.nonvoluntary_ctxt_switches or ""),
-                        str(process.metrics.vm_rss or ""),
-                        str(process.metrics.read_bytes or ""),
-                        str(process.metrics.write_bytes or "")
+                for process in self.processes:
+                    stat_values = [
+                        self.podName, timestamp,
+                        str(process.pid), process.comm, process.state, str(process.ppid),
+                        str(process.pgrp), str(process.session), str(process.tty_nr),
+                        str(process.tpgid), str(process.flags), str(process.minflt),
+                        str(process.cminflt), str(process.majflt), str(process.cmajflt),
+                        str(process.utime), str(process.stime), str(process.cutime),
+                        str(process.cstime), str(process.priority), str(process.nice),
+                        str(process.num_threads), str(process.itrealvalue),
+                        str(process.starttime), str(process.vsize), str(process.rss),
+                        str(process.rsslim), str(process.startcode), str(process.endcode),
+                        str(process.startstack), str(process.kstkesp), str(process.kstkeip),
+                        str(process.signal), str(process.blocked), str(process.sigignore),
+                        str(process.sigcatch), str(process.wchan), str(process.nswap),
+                        str(process.cnswap), str(process.exit_signal), str(process.processor),
+                        str(process.rt_priority), str(process.policy), str(process.delayacct_blkio_ticks),
+                        str(process.guest_time), str(process.cguest_time), str(process.start_data),
+                        str(process.end_data), str(process.start_brk), str(process.arg_start),
+                        str(process.arg_end), str(process.env_start), str(process.env_end),
+                        str(process.exit_code)
                     ]
-                else:
-                    metrics_values = ["", "", "", "", ""]
 
-                file.write(",".join([*stat_values, *metrics_values]) + "\n")
+                    if process.metrics:
+                        metrics_values = [
+                            str(process.metrics.voluntary_ctxt_switches or ""),
+                            str(process.metrics.nonvoluntary_ctxt_switches or ""),
+                            str(process.metrics.vm_rss or ""),
+                            str(process.metrics.read_bytes or ""),
+                            str(process.metrics.write_bytes or "")
+                        ]
+                    else:
+                        metrics_values = ["", "", "", "", ""]
+
+                    file.write(",".join([*stat_values, *metrics_values]) + "\n")
 
     def saveCgroupMetricsToCSV(self, cgroup, timestamp, experiment_id=None):
         """
@@ -339,21 +345,24 @@ class Pod:
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
 
-        file_name = os.path.join(log_dir, f"cgroup_experiment{experiment_id}.csv")
-        lock = _with_file_lock(file_name)
+        basename = f"cgroup_experiment{experiment_id}.csv"
+        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
 
-        with lock, open(file_name, mode="a", newline="", encoding="utf-8") as file:
-            if _need_write_header_once(file_name):
-                file.write(",".join(self.CGROUP_HEADERS) + "\n")
+        lock = _with_file_lock(filename)
+        with lock:
+            header_needed = (not os.path.exists(filename)) or (os.path.getsize(filename) == 0)
+            with open(filename, mode="a", newline="", encoding="utf-8") as file:
+                if header_needed:
+                    file.write(",".join(self.CGROUP_HEADERS) + "\n")
 
-            row = [
-                self.podName, timestamp,
-                str(cgroup.memory_current or ""),
-                str(cgroup.memory_limit or ""),
-                str(cgroup.io_read_bytes or ""),
-                str(cgroup.io_write_bytes or "")
-            ]
-            file.write(",".join(row) + "\n")
+                row = [
+                    self.podName, timestamp,
+                    str(cgroup.memory_current or ""),
+                    str(cgroup.memory_limit or ""),
+                    str(cgroup.io_read_bytes or ""),
+                    str(cgroup.io_write_bytes or "")
+                ]
+                file.write(",".join(row) + "\n")
 
     def saveProcessDataToDB(self):
         """Save Pod's process data to DB"""
@@ -429,8 +438,9 @@ class Pod:
 
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
+        basename = f"process_classification_experiment{experiment_id}.csv"
+        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
 
-        filename = os.path.join(log_dir, f"process_classification_experiment{experiment_id}.csv")
         lock = _with_file_lock(filename)
 
         ts = self.getTimestamp()
@@ -445,11 +455,14 @@ class Pod:
             base.update(proc)  # 기존 키를 넣되, 최종 출력은 고정 순서대로
             return [str(base.get(k, "")) for k in self.CLASSIFICATION_KEYS_ORDER]
 
-        with lock, open(filename, "a", newline="", encoding="utf-8") as f:
-            if _need_write_header_once(filename):
-                f.write(",".join(self.CLASSIFICATION_KEYS_ORDER) + "\n")
-            for proc in classification:
-                f.write(",".join(_row_from(proc)) + "\n")
+        with lock:
+            header_needed = (not os.path.exists(filename)) or (os.path.getsize(filename) == 0)
+            with open(filename, "a", newline="", encoding="utf-8") as f:
+                if header_needed:
+                    f.write(",".join(self.CLASSIFICATION_KEYS_ORDER) + "\n")
+
+                for proc in classification:
+                    f.write(",".join(_row_from(proc)) + "\n")
 
     def saveSummaryToCsv(self, summary, pod_name, experiment_id=None):
         """
@@ -460,8 +473,9 @@ class Pod:
 
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
+        basename = f"process_summary_experiment{experiment_id}.csv"
+        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
 
-        filename = os.path.join(log_dir, f"process_summary_experiment{experiment_id}.csv")
         lock = _with_file_lock(filename)
 
         ts = self.getTimestamp()
@@ -473,11 +487,13 @@ class Pod:
         }
         base.update(summary)
 
-        with lock, open(filename, "a", newline="", encoding="utf-8") as f:
-            if _need_write_header_once(filename):
-                f.write(",".join(self.SUMMARY_KEYS_ORDER) + "\n")
-            row = [str(base.get(k, "")) for k in self.SUMMARY_KEYS_ORDER]
-            f.write(",".join(row) + "\n")
+        with lock:
+            header_needed = (not os.path.exists(filename)) or (os.path.getsize(filename) == 0)
+            with open(filename, "a", newline="", encoding="utf-8") as f:
+                if header_needed:
+                    f.write(",".join(self.SUMMARY_KEYS_ORDER) + "\n")
+                row = [str(base.get(k, "")) for k in self.SUMMARY_KEYS_ORDER]
+                f.write(",".join(row) + "\n")
 
     def shouldGarbageCollection(self):
         """

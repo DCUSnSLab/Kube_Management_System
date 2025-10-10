@@ -163,3 +163,10 @@ logging
 
 process_data.db
 /process_data.zip
+
+/data
+
+/tool/experiment_data
+/tool/analyze
+/simulator/data
+/simulator/analyze
