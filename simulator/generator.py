@@ -208,7 +208,7 @@ class Generator:
                 self.count += 1
 
         except KeyboardInterrupt:
-            print("Keyboard Interrupted. Cleanning up...")
+            print("Keyboard Interrupted. Cleaning up...")
             self.deletePod()
         finally:
             # simulator end(or except) and gc stop
@@ -219,7 +219,7 @@ class Generator:
     def experimentDataCollection(self, interval=60, cnt=60, worker=10):
         i = 0
         while i < self.times:  # times = 10
-            self.pod_list={}
+            self.pod_list = {}
             self.count = 0
 
             active, idle = self.generateRandomNumber(100, 2)
@@ -312,7 +312,7 @@ class Generator:
         """
         Create pod
         """
-        #active pod
+        # active pod
         ac += self.active  # 현재 파드의 수 + 생성할 파드의 수
         while self.active < ac:
             self.pod_manifest['metadata']['name'] = 'experiment-active-'+str(self.active)

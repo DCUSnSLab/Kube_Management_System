@@ -18,11 +18,13 @@ CGROUP_HEADERS = [
 ]
 
 CLASSIFICATION_KEYS_ORDER = [
-    "pod_name", "timestamp", "pid", "comm", "role", "state", "score", "reason"
+    "experiment_id", "pod_name", "timestamp", "pid", "comm", "state", "reason", "CPUtime_delta", "ctxt_delta",
+    "non_ctxt_delta", "rss_delta", "minflt_delta", "io_delta"
 ]
 
 SUMMARY_KEYS_ORDER = [
-    "pod_name", "timestamp", "total", "active_cnt", "idle_cnt", "running_cnt", "bg_active_cnt", "note"
+    "experiment_id", "pod_name", "timestamp", "status", "description", "total", "active", "inactive", "zombie"
+
 ]
 
 def load_data(file_path: str) -> pd.DataFrame:
@@ -211,23 +213,25 @@ def merge_experiment_files(input_dir: str, output_path: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    DATA_DIR = "experiment_data/"
+    DATA_DIR = "../data/"
     FILE_NAME = "process_metrics_experiment1.csv"
-    # add_process_headers(DATA_DIR)
+    add_process_headers(DATA_DIR)
+    add_classification_headers(DATA_DIR)
+    add_summary_headers(DATA_DIR)
 
-    file_path = os.path.join(DATA_DIR, FILE_NAME)
-
-    # 단일 파일 처리
-    df = preprocess_file(file_path)
-
-    # CSV 저장
-    output_path = "analyze/statistics_process_metrics_experiment1.csv"
-    save_data(df, output_path)
-
-    # 엑셀로 저장
-    excel_path = "analyze/statistics_process_metrics_experiment1.xlsx"
-    convert_to_excel(df, excel_path)
-
-    # 여러 실험 파일 병합
-    merged_output_path = "analyze/statistics_process_metrics_merged.csv"
-    merge_experiment_files(DATA_DIR, merged_output_path)
+    # file_path = os.path.join(DATA_DIR, FILE_NAME)
+    #
+    # # 단일 파일 처리
+    # df = preprocess_file(file_path)
+    #
+    # # CSV 저장
+    # output_path = "analyze/statistics_process_metrics_experiment1.csv"
+    # save_data(df, output_path)
+    #
+    # # 엑셀로 저장
+    # excel_path = "analyze/statistics_process_metrics_experiment1.xlsx"
+    # convert_to_excel(df, excel_path)
+    #
+    # # 여러 실험 파일 병합
+    # merged_output_path = "analyze/statistics_process_metrics_merged.csv"
+    # merge_experiment_files(DATA_DIR, merged_output_path)
