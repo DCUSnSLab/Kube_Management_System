@@ -7,6 +7,7 @@ import math
 """
 Active Process - Burst Mode
 버스트 모드로 활동하는 프로세스
++ random sleep 추가 (5분~30분 간 랜덤 간격으로 휴식)
 """
 
 def signal_handler(sig, frame):
@@ -39,15 +40,22 @@ def main():
         while time.time() - burst_start < burst_duration:
             result = burst_computation(random.randint(100000, 500000))
             burst_count += 1
-        
+
+            # 짧은 pause (micro idle) 삽입
+            if random.random() < 0.2:
+                pause = random.uniform(0.05, 0.2)
+                time.sleep(pause)
+
         total_bursts += 1
         print(f"[ACTIVE] Burst completed: {burst_count} operations", flush=True)
         burst_count = 0
-        
-        # 휴식 기간 (1-3초)
-        idle_duration = random.uniform(1, 3)
-        print(f"[ACTIVE] Idle for {idle_duration:.1f} seconds", flush=True)
+
+        # 장시간 idle 구간 (5분~30분)
+        idle_duration = random.uniform(300, 1800)
+        minutes = idle_duration / 60
+        print(f"[ACTIVE] Idle for {minutes:.1f} minutes before next burst", flush=True)
         time.sleep(idle_duration)
+
 
 if __name__ == "__main__":
     import os

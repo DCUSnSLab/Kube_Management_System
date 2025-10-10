@@ -3,11 +3,14 @@ import sys
 import time
 import signal
 import gc
-import psutil  # 메모리 모니터링용
+import psutil
+import random
 
 """
 Active Process - Memory Intensive
+(Randomized Normal Distribution Allocation)
 """
+
 
 def signal_handler(sig, frame):
     print("\nMemory intensive process terminated")
@@ -25,14 +28,14 @@ class MemoryBlock:
 
 def main():
     print(f"[ACTIVE] Memory Intensive Process Started - PID: {os.getpid()}", flush=True)
-    blocks, total_alloc, max_memory = [], 0, 120  # 200Mi 제한에서 안전하게 120MB
-    block_size = 5  # 5MB (활성 유지)
+    blocks, total_alloc, max_memory = [], 0, 150
+    mu, sigma = 5, 2  # 평균 5MB, 표준편차 2MB
+
     while True:
-        # 시스템 메모리 사용률 확인
         try:
             memory_percent = psutil.virtual_memory().percent
             if memory_percent > 85:
-                print(f"[ACTIVE] System memory usage high: {memory_percent:.1f}%, cleaning...", flush=True)
+                print(f"[ACTIVE] System memory high: {memory_percent:.1f}% → releasing", flush=True)
                 if blocks:
                     for _ in range(min(3, len(blocks))):
                         released = blocks.pop(0)
@@ -40,35 +43,32 @@ def main():
                         del released
                     gc.collect()
         except:
-            pass  # psutil 오류 무시
-        
-        if total_alloc < max_memory:
+            pass
+
+        # 정규분포 기반 랜덤 블록 크기
+        block_size = max(1, int(random.gauss(mu, sigma)))
+
+        if total_alloc + block_size < max_memory:
             try:
                 block = MemoryBlock(block_size)
                 blocks.append(block)
                 total_alloc += block_size
-                print(f"[ACTIVE] Memory allocated: {total_alloc}MB / {max_memory}MB", flush=True)
+                print(f"[ACTIVE] Allocated {block_size}MB → Total {total_alloc}MB / {max_memory}MB", flush=True)
             except MemoryError:
-                if blocks:
-                    released = blocks.pop(0)
-                    total_alloc -= released.size
-                    del released
-                    gc.collect()
-        else:
-            # 메모리 청리: 오래된 블록 제거
-            if len(blocks) > 15:
-                for _ in range(5):
-                    if blocks:
-                        released = blocks.pop(0)
-                        total_alloc -= released.size
-                        del released
                 gc.collect()
-                print(f"[ACTIVE] Memory cleaned: {total_alloc}MB", flush=True)
-            else:
-                # 더 활발한 작업
-                for block in blocks[:8]:
-                    block.data[0] = (block.data[0] + 1) % 256
-        time.sleep(2)
+        else:
+            if len(blocks) > 10:
+                released = blocks.pop(0)
+                total_alloc -= released.size
+                del released
+                gc.collect()
+                print(f"[ACTIVE] Memory cleaned → {total_alloc}MB", flush=True)
+
+        # 블록 내 접근 (활성 상태 유지)
+        for block in blocks[:5]:
+            block.data[0] = (block.data[0] + 1) % 256
+
+        time.sleep(random.uniform(1.0, 2.5))
 
 if __name__ == "__main__":
     main()
