@@ -317,10 +317,7 @@ class ProcessManager:
           - process_summary(프로세스 요약정보): dict
         """
         if not processes:
-            return {
-                'detailed_classification': {},
-                'process_summary': {}
-            }
+            return [], {'total': 0, 'active': 0, 'inactive': 0, 'zombie': 0}
         pod_name = self.pod.metadata.name
         current_time = time.time()
 
@@ -453,13 +450,15 @@ class ProcessManager:
         }
 
         for p in processes:
+            write_byte = p.metrics.write_bytes or 0
+            read_byte = p.metrics.read_bytes or 0
             self.previous_states[pod_name]['processes'][p.pid] = {
                 'CPUtime': p.utime + p.stime,
-                'voluntary_ctxt': p.metrics.voluntary_ctxt_switches,
-                'nonvoluntary_ctxt': p.metrics.nonvoluntary_ctxt_switches,
-                'rss': p.rss,
-                'minflt': p.minflt,
-                'io_bytes': p.metrics.write_bytes + p.metrics.read_bytes,
+                'voluntary_ctxt': p.metrics.voluntary_ctxt_switches or 0,
+                'nonvoluntary_ctxt': p.metrics.nonvoluntary_ctxt_switches or 0,
+                'rss': p.rss or 0,
+                'minflt': p.minflt or 0,
+                'io_bytes': write_byte + read_byte,
                 'comm': p.comm,
             }
 
