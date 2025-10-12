@@ -63,7 +63,7 @@ class GarbageCollector():
                 print(f"[TIMING] Collected statuses for {len(self.podlist)} pods [{elapsed:.3f}s]")
 
                 for p_name, p_obj in self.podlist.items():
-                    print(p_name)
+                    # print(p_name)
                     # save logging data
                     p_obj.insertPodInfo()
                     p_obj.saveProcessDataToDB()
@@ -125,7 +125,7 @@ class GarbageCollector():
         for p in filtering_pods:
             pod_name = p.metadata.name
             pod_status = p.status.phase
-            print('---',pod_name, pod_status)
+            # print('---',pod_name, pod_status)
             if pod_status == "Running":
                 if pod_name in self.podlist:
                     #기존 Pod객체 재사용

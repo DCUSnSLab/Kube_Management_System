@@ -11,14 +11,22 @@ from pod import Pod
 from processManager import ProcessManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from simulator.orchestrator import QueueWriter
 
-def run_gc(ns, sc):
-    gc = GarbageCollector(namespace=ns, isDev=True, stop_event=sc)
+
+def run_gc(ns, sc, log_q=None):
+    # 표준출력 리다이렉트 (GC 프로세스 안에서 실행)
+    if log_q is not None:
+        import sys
+        sys.stdout = QueueWriter(log_q, ns, "stdout")
+        sys.stderr = QueueWriter(log_q, ns, "stderr")
+
+    gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
     gc.manage()
 
 
 class Generator:
-    def __init__(self, namespace: str = 'gc-simulator'):
+    def __init__(self, namespace: str = 'gc-simulator', log_queue=None):
         config.load_kube_config()
         self.coreV1 = client.CoreV1Api()
         self.appV1 = client.AppsV1Api()
@@ -32,7 +40,9 @@ class Generator:
         self.running = 0  # running pods
         self.bg_active = 0  # background active pods
         self.stop_event = Event()
-        self.gc_process = Process(target=run_gc, args=(self.namespace, self.stop_event))  # 시뮬레이터와 동시 수행을 위해 멀티프로세싱 사용
+        self.log_queue = log_queue
+        self.stop_event = Event()
+        self.gc_process = Process(target=run_gc, args=(self.namespace, self.stop_event, self.log_queue))  # 시뮬레이터와 동시 수행을 위해 멀티프로세싱 사용
 
         self.pod_manifest = {
             "apiVersion": "v1",
@@ -95,10 +105,10 @@ class Generator:
         return random.choices(states, weights=weights, k=1)[0]
 
     def run_poisson(self,
-                           duration_s: int = 3600,  # 한 사이클 전체 실험 길이
-                           generate_until_min: int = 20,  # 생성 구간: 앞 X분까지만 생성
-                           rate_per_min: float = 1.5,  # 포아송 생성률(분당 G)
-                           inactive_threshold_s: int = 300
+                           duration_s: int = 180,  # 한 사이클 전체 실험 길이
+                           generate_until_min: int = 2,  # 생성 구간: 앞 X분까지만 생성
+                           rate_per_min: float = 3,  # 포아송 생성률(분당 G)
+                           inactive_threshold_s: int = 60
                            ):
 
         # 생성 구간(초)
@@ -154,7 +164,7 @@ class Generator:
                 # 유지구간 종료시간 계산 - 마지막 생성이 없었다면 생성구간 종료시점을 기준으로 유지 임계값 적용
                 anchor_ts = last_creation_ts if last_creation_ts is not None else creation_end_ts
                 # 마지막 임계 시간+300초 더 추가함 5분더 시뮬레이터가 진행할 수 있도록, 300초는 없애도 되고 줄여도됨
-                hold_until_ts = max(base_cycle_end_ts, anchor_ts + max(0, inactive_threshold_s + 300))
+                hold_until_ts = max(base_cycle_end_ts, anchor_ts + max(0, inactive_threshold_s))
 
                 print(f"[POISSON] holding until "
                       f"{int(hold_until_ts - time.time())}s from now "
