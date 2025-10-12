@@ -12,7 +12,8 @@ from DB_postgresql import (
     get_last_bash_history,
     save_bash_history,
     save_delete_reason,
-    is_deleted_in_DB, is_exist_in_DB
+    is_deleted_in_DB, is_exist_in_DB,
+    update_pod_lifecycle_creation_if_empty
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -117,8 +118,8 @@ class Pod:
     def initPodData(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
         self.insertPodLifecycle()
-        self.insertPodInfo()
         self.savePodLifecycleToDB()
+        self.insertPodInfo()
         self.savePodInfoToDB()
 
     def isDeletedInDB(self):
@@ -154,6 +155,8 @@ class Pod:
         p.startTime = self.pod.status.start_time
 
         self.pod_status = p
+
+        update_pod_lifecycle_creation_if_empty(self.podName, self.namespace, p.creation_timestamp)
 
     def savePodInfoToDB(self):
         """pod's status save to DB"""

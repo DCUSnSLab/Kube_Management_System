@@ -557,3 +557,60 @@ def is_exist_in_DB(pod_name, namespace):
         if conn:
             cursor.close()
             conn.close()
+
+def update_pod_lifecycle_creation_if_empty(pod_name, namespace, creation_timestamp):
+    """
+    podlifecycle created_at이 비어있을 경우 업데이트하는 함수
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        # pod_id 조회
+        cursor.execute("""
+            SELECT pod_id FROM pod_info
+            WHERE pod_name = %s AND namespace = %s;
+        """, (pod_name, namespace))
+        result = cursor.fetchone()
+
+        if not result:
+            logging.warning(f"Pod not found in pod_info: {pod_name} ({namespace})")
+            return
+
+        pod_id = result[0]
+
+        # created_at 값 확인
+        cursor.execute("""
+                SELECT created_at FROM pod_lifecycle WHERE pod_id = %s;
+            """, (pod_id,))
+        row = cursor.fetchone()
+
+        if row is None or row[0] is None:
+            logging.info(f"[UPDATE] pod_lifecycle.created_at is empty. Saving creation_timestamp for {pod_name}")
+            cursor.execute("""
+                INSERT INTO pod_lifecycle (pod_id, created_at)
+                VALUES (%s, %s)
+                ON CONFLICT (pod_id)
+                DO UPDATE SET 
+                    created_at = EXCLUDED.created_at, 
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE pod_lifecycle.created_at IS NULL;
+            """, (pod_id, creation_timestamp))
+            conn.commit()
+        else:
+            logging.info(f"[SKIP] pod_lifecycle.created_at already set for {pod_name}: {row[0]}")
+
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"Error updating pod_lifecycle.created_at: {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
