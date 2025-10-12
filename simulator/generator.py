@@ -97,7 +97,7 @@ class Generator:
     def run_poisson(self,
                            duration_s: int = 3600,  # 한 사이클 전체 실험 길이
                            generate_until_min: int = 20,  # 생성 구간: 앞 X분까지만 생성
-                           rate_per_min: float = 6.0,  # 포아송 생성률(분당 G)
+                           rate_per_min: float = 1.5,  # 포아송 생성률(분당 G)
                            inactive_threshold_s: int = 300
                            ):
 
@@ -476,7 +476,12 @@ class Generator:
 
 if __name__ == "__main__":
     #네임스페이스 값을 비워두면 'default'로 지정
-    generator = Generator()
+    # generator = Generator()
+    # generator = Generator(namespace='gc-10m')
+    # generator = Generator(namespace='gc-15m')
+    # generator = Generator(namespace='gc-20m')
+    # generator = Generator(namespace='gc-25m')
+    generator = Generator(namespace='gc-30m')
     #generator.experimentDataCollection()
     # generator.run()
     # generator.deletePod()

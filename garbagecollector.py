@@ -24,8 +24,12 @@ class GarbageCollector():
 
     def manage(self, interval=60, worker=10):
         if self.devMode is True:
-            self.namespace = 'gc-simulator'
-
+            # self.namespace = 'gc-simulator'
+            # self.namespace = 'gc-10m'
+            # self.namespace = 'gc-15m'
+            # self.namespace = 'gc-20m'
+            # self.namespace = 'gc-25m'
+            self.namespace = 'gc-30m'
         start_anchor = time.perf_counter()  # 고정 기준 시각
         try:
             while True:
@@ -70,9 +74,12 @@ class GarbageCollector():
                         print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
                         print(f"  Reason: {gc_reason}")
                         print(f"  Type: {cause}")
-                        p_obj.insert_DeleteReason(gc_reason)
-                        p_obj.save_DeleteReason_to_DB()
-                        self.deletePod(p_name)  # pod 삭제
+                        try:
+                            self.deletePod(p_name)  # pod 삭제
+                            p_obj.insert_DeleteReason(gc_reason)
+                            p_obj.save_DeleteReason_to_DB()
+                        except Exception as e:
+                            print(f"[ERROR]: {e}")
 
                     print('-' * 50)
 
@@ -117,17 +124,20 @@ class GarbageCollector():
         new_podlist = {}
         for p in filtering_pods:
             pod_name = p.metadata.name
-            if pod_name in self.podlist:
-                #기존 Pod객체 재사용
-                new_podlist[pod_name] = self.podlist[pod_name]
-            else:
-                core_api = client.CoreV1Api()
-                new_podlist[pod_name] = Pod(core_api, p)
-                pod_obj = new_podlist[pod_name]
+            pod_status = p.status.phase
+            print('---',pod_name, pod_status)
+            if pod_status == "Running":
+                if pod_name in self.podlist:
+                    #기존 Pod객체 재사용
+                    new_podlist[pod_name] = self.podlist[pod_name]
+                else:
+                    core_api = client.CoreV1Api()
+                    new_podlist[pod_name] = Pod(core_api, p)
+                    pod_obj = new_podlist[pod_name]
 
-                if not pod_obj.isExistInDB() or pod_obj.isDeletedInDB():
-                    print(f"Initializing new pod: {pod_name}")
-                    pod_obj.initPodData()
+                    if not pod_obj.isExistInDB() or pod_obj.isDeletedInDB():
+                        print(f"Initializing new pod: {pod_name}")
+                        pod_obj.initPodData()
 
         removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
         self.recordDeletedPod(removed_pod)

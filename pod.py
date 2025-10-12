@@ -64,7 +64,7 @@ class PodActivityStatus(Enum):
 
 class PodActivityPolicy:
     # 예: N=5분, 특정 시간동안 비활성일 경우 GC 대상으로 변경
-    INACTIVE_DURATION_THRESHOLD = 5 * 60
+    INACTIVE_DURATION_THRESHOLD = 30 * 60
 
 
 class Pod:
@@ -174,7 +174,7 @@ class Pod:
             self.pod_lifecycle = Pod_Lifecycle()
         """When pod deleted, save time and because of pod deleted"""
         if reason is None:
-            reson = "No reason - UNKNOWN"
+            reason = "No reason - UNKNOWN"
         self.pod_lifecycle.reason_deletion = reason
         self.pod_lifecycle.deleteTime = self.getTimestamp()
 
@@ -289,6 +289,9 @@ class Pod:
         """
         Save process data in csv file
         """
+        if not self.processes:
+            print(f"[WARN] No process data found for pod {self.podName}. Skipping csv save.")
+            return
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
 
