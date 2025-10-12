@@ -25,7 +25,8 @@ import os
 
 # 모든 Pod 객체가 동일한 타임스탬프를 가지기 위함 (데이터 저장 파일명)
 _EXPERIMENT_SESSION_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-
+# 데이터 베이스 디렉터리 (환경변수로 오버라이드 가능)
+_DATA_BASEDIR = os.getenv("GC_DATA_DIR", os.path.join(os.getcwd(), "data"))
 # 파일별 락 (동일 프로세스/스레드 간 보호)
 _FILE_LOCKS = defaultdict(threading.Lock)
 # 헤더 썼는지 빠르게 체크하기 위한 집합(프로세스 내 캐시)
@@ -55,6 +56,14 @@ def _need_write_header_once(fname: str) -> bool:
         _HEADER_WRITTEN.add(fname)
         return need
 
+def _ns_log_path(namespace: str, basename: str) -> str:
+    """
+    네임스페이스와 세션 타임스탬프를 파일명 앞에 붙임.
+    예: ./data/gc-30m_20251012_234149_process_metrics_experiment0.csv
+    """
+    _ensure_dir(_DATA_BASEDIR)
+    safe_ns = namespace.replace("/", "_")
+    return os.path.join(_DATA_BASEDIR, f"{safe_ns}_{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
 
 class PodActivityStatus(Enum):
     """프로세스 상태 기반 파드 활성 유무 결정"""
@@ -200,7 +209,7 @@ class Pod:
             7일 이상 경과시 비활성 -> False
         """
         result = self.hm.analyze(self.timeBashHistory)
-        print(result)
+        # print(result)
 
         # pod_lifecycle에 리스토리 검사 결과 저장
         save_bash_history_result(self.podName, self.namespace, result)
@@ -279,7 +288,7 @@ class Pod:
         summary["status"] = status.value
         summary["description"] = reason
         self.saveSummaryToCsv(summary, self.podName, experiment_id)
-        print("Pod status:", summary["status"])
+        # print("Pod status:", summary["status"])
         return self.isActiveResultProcess
 
     def printProcList(self):
@@ -299,7 +308,8 @@ class Pod:
         _ensure_dir(log_dir)
 
         basename = f"process_metrics_experiment{experiment_id}.csv"
-        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        #filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        filename = _ns_log_path(self.namespace, basename)
 
         lock = _with_file_lock(filename)
 
@@ -354,7 +364,8 @@ class Pod:
         _ensure_dir(log_dir)
 
         basename = f"cgroup_experiment{experiment_id}.csv"
-        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        #filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        filename = _ns_log_path(self.namespace, basename)
 
         lock = _with_file_lock(filename)
         with lock:
@@ -451,7 +462,8 @@ class Pod:
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
         basename = f"process_classification_experiment{experiment_id}.csv"
-        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        #filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        filename = _ns_log_path(self.namespace, basename)
 
         lock = _with_file_lock(filename)
 
@@ -486,7 +498,8 @@ class Pod:
         log_dir = os.path.join(os.getcwd(), "data")
         _ensure_dir(log_dir)
         basename = f"process_summary_experiment{experiment_id}.csv"
-        filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        #filename = os.path.join(log_dir, f"{_EXPERIMENT_SESSION_TIMESTAMP}_{basename}")
+        filename = _ns_log_path(self.namespace, basename)
 
         lock = _with_file_lock(filename)
 
