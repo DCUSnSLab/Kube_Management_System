@@ -106,7 +106,7 @@ class ProcessManager:
 
             if not cmdline:
                 return ""
-
+            return cmdline
         except Exception as e:
             print(f"[ERROR] Failed to exec into Pod '{self.pod.metadata.name}': {e}")
         return ""
