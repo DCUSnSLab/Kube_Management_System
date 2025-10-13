@@ -10,7 +10,7 @@ import time
 from multiprocessing import Event
 
 class GarbageCollector():
-    def __init__(self, namespace='default', container=None, isDev=False, stop_event=None):
+    def __init__(self, namespace='default', container=None, isDev=False, stop_event=None, Inactive_Threshold_s=None):
         config.load_kube_config()  # 필수 config값 불러옴
         self.v1 = client.CoreV1Api()  # api
         self.namespace: str = namespace
@@ -21,6 +21,7 @@ class GarbageCollector():
         self.intervalTime = 60
         self.count = 1
         self._stop_event = stop_event or Event()
+        self.Inactive_Threshold_s = Inactive_Threshold_s
 
     def manage(self, interval=60, worker=10):
         if self.devMode is True:
@@ -132,7 +133,7 @@ class GarbageCollector():
                     new_podlist[pod_name] = self.podlist[pod_name]
                 else:
                     core_api = client.CoreV1Api()
-                    new_podlist[pod_name] = Pod(core_api, p)
+                    new_podlist[pod_name] = Pod(core_api, p, self.Inactive_Threshold_s)
                     pod_obj = new_podlist[pod_name]
 
                     if not pod_obj.isExistInDB() or pod_obj.isDeletedInDB():

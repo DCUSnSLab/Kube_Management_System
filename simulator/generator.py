@@ -14,14 +14,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from simulator.orchestrator import QueueWriter
 
 
-def run_gc(ns, sc, log_q=None):
+def run_gc(ns, sc, log_q=None, iactThr=None):
     # 표준출력 리다이렉트 (GC 프로세스 안에서 실행)
     if log_q is not None:
         import sys
         sys.stdout = QueueWriter(log_q, ns, "stdout")
         sys.stderr = QueueWriter(log_q, ns, "stderr")
 
-    gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc)
+    gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc, Inactive_Threshold_s=iactThr)
     gc.manage()
 
 
@@ -42,7 +42,7 @@ class Generator:
         self.stop_event = Event()
         self.log_queue = log_queue
         self.stop_event = Event()
-        self.gc_process = Process(target=run_gc, args=(self.namespace, self.stop_event, self.log_queue))  # 시뮬레이터와 동시 수행을 위해 멀티프로세싱 사용
+
 
         self.pod_manifest = {
             "apiVersion": "v1",
@@ -105,17 +105,21 @@ class Generator:
         return random.choices(states, weights=weights, k=1)[0]
 
     def run_poisson(self,
-                           duration_s: int = 180,  # 한 사이클 전체 실험 길이
-                           generate_until_min: int = 2,  # 생성 구간: 앞 X분까지만 생성
-                           rate_per_min: float = 3,  # 포아송 생성률(분당 G)
-                           inactive_threshold_s: int = 60
+                           duration_s: int = 3600,  # 한 사이클 전체 실험 길이
+                           generate_until_min: int = 20,  # 생성 구간: 앞 X분까지만 생성
+                           rate_per_min: float = 1.5,  # 포아송 생성률(분당 G)
+                           inactive_threshold_s: int = 300,
+                           hasGC = True
                            ):
 
         # 생성 구간(초)
         generate_until_s = max(0, min(duration_s, int(generate_until_min * 60)))
-
-        # GC 프로세스 시작 TODO: inactive_threashold 전달 필요
-        self.gc_process.start()
+        if hasGC is True:
+            self.gc_process = Process(target=run_gc,args=(self.namespace, self.stop_event, self.log_queue, inactive_threshold_s))  # 시뮬레이터와 동시 수행을 위해 멀티프로세싱 사용
+            # GC 프로세스 시작 TODO: inactive_threashold 전달 필요
+            self.gc_process.start()
+        else:
+            print("------ No GC process :):):):):):):)")
 
         try:
             # ===== 전체 실험 반복 =====
