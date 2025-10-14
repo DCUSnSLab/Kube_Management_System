@@ -7,6 +7,12 @@ os.environ["QT_API"] = "pyqt5"
 # 맨 위쪽, matplotlib 관련 import 전에
 import matplotlib
 matplotlib.use("QtAgg")   # 반드시 FigureCanvas import 전에!
+matplotlib.rcParams.update({
+    "axes.titlesize": 15,   # 각 서브플롯 title
+    "axes.labelsize": 11,   # x/y 축 라벨
+    "xtick.labelsize": 10,  # x축 tick
+    "ytick.labelsize": 10,  # y축 tick
+})
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -290,7 +296,7 @@ class TemplatePanel(QWidget):
 
         title_metric = self.current_metric() or ""
         ax.set_title(f"[{self.title}] {self.current_agg()} {title_metric} by {GROUP_COL}")
-        ax.set_xlabel(GROUP_COL)
+        ax.set_xlabel("cycle(min)")
         ax.set_ylabel("value")
         ax.grid(True, linestyle="--", alpha=0.4)
         self.canvas.draw()
@@ -768,15 +774,16 @@ class CommStateGrid(QWidget):
             ax.plot(s_slp.index.values, s_slp.values, marker="o", markersize=3, label="sleep")
             xmins.append(s_slp.index.min()); xmaxs.append(s_slp.index.max())
         if xmins and xmaxs: ax.set_xlim(min(xmins), max(xmaxs))
-        ax.set_xlabel(GROUP_COL); ax.set_ylabel(ylabel); ax.grid(True, linestyle="--", alpha=0.4)
+        ax.set_xlabel("cycle(min)"); ax.set_ylabel(ylabel); ax.grid(True, linestyle="--", alpha=0.4)
 
     def redraw(self):
         metric = self._metric_name()
         if not metric: return
 
         # 타일 순서: [prefix 평균 2개] + [개별 comm 12개]
-        tiles = [("prefix", pfx, label) for pfx, label in self.prefix_avgs] + \
-                [("exact", key, key) for key in self.comm_keys]
+        # tiles = [("prefix", pfx, label) for pfx, label in self.prefix_avgs] + \
+        #         [("exact", key, key) for key in self.comm_keys]
+        tiles = [("exact", key, key) for key in self.comm_keys]
 
         n = len(tiles)
         cols = max(1, min(self._calc_cols(), n))
@@ -817,7 +824,7 @@ class CommStateGrid(QWidget):
             first_legend_ax.legend(loc="best")
 
         self.fig.suptitle(
-            f"Comm × State by {GROUP_COL} — {metric}",
+            f"Comm × State by cycle(min) — {metric}",
             fontsize=11, y=0.98
         )
         self.fig.tight_layout(rect=[0, 0, 1, 0.96])
@@ -1064,7 +1071,7 @@ def center_on_primary(win):
         return
 
     # 범위 초과 방지
-    screennum = 1  # 띄울 모니터 번호
+    screennum = 0  # 띄울 모니터 번호
     idx = max(0, min(screennum, len(screens) - 1))
     screen = screens[idx]
 
@@ -1083,7 +1090,7 @@ def main(df):
         app = QApplication(sys.argv)
 
     w = CyclePlotterApp(df)   # 당신이 만든 최상위 위젯
-    w.resize(1280, 720)
+    w.resize(1200, 1200)
     w.show()
     center_on_primary(w)
 
