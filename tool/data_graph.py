@@ -661,7 +661,7 @@ class CommStateGrid(QWidget):
         # 정규화 컬럼
         self.df["__comm_norm__"] = self.df["comm"].astype(str).str.strip().str.lower()
         self.comm_keys = [c.strip().lower() for c in comm_list]
-        self.prefix_avgs = [("active", "active_* (avg)"), ("bg", "bg_* (avg)")]
+        # self.prefix_avgs = [("active", "active_* (avg)"), ("bg", "bg_* (avg)")]
 
         # 상단 컨트롤
         top = QHBoxLayout()
@@ -775,8 +775,7 @@ class CommStateGrid(QWidget):
         if not metric: return
 
         # 타일 순서: [prefix 평균 2개] + [개별 comm 12개]
-        tiles = [("prefix", pfx, label) for pfx, label in self.prefix_avgs] + \
-                [("exact", key, key) for key in self.comm_keys]
+        tiles = [("exact", key, key) for key in self.comm_keys]
 
         n = len(tiles)
         cols = max(1, min(self._calc_cols(), n))

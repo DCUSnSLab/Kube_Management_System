@@ -318,12 +318,63 @@ if __name__ == "__main__":
 
     # Define tasks (edit as needed)
     tasks = [
-        SimTask("gc-05m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30}),
-        SimTask("gc-10m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30}),
-        SimTask("gc-15m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30}),
-        SimTask("gc-20m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30}),
-        SimTask("gc-25m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30}),
-        SimTask("gc-30m", {"duration_s": 70, "generate_until_min": 1, "rate_per_min": 2, "inactive_threshold_s": 30})
+        # SimTask("gc-05m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300}),
+        # SimTask("gc-10m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 600}),
+        # SimTask("gc-15m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 900}),
+        # SimTask("gc-20m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1200}),
+        # SimTask("gc-25m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1500}),
+        # SimTask("gc-30m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1800}),
+
+        # SimTask("gc-05m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300}),
+        # SimTask("gc-10m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 600}),
+        # SimTask("gc-15m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 900}),
+        # SimTask("gc-20m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1200}),
+        # SimTask("gc-25m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1500}),
+        # SimTask("gc-30m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1800}),
+
+        # SimTask("gc-05m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300}),
+        # SimTask("gc-10m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 600}),
+        # SimTask("gc-15m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 900}),
+        # SimTask("gc-20m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1200}),
+        # SimTask("gc-25m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1500}),
+        # SimTask("gc-30m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1800}),
+
+        # SimTask("gc-05m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300}),
+        # SimTask("gc-10m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 600}),
+        # SimTask("gc-15m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 900}),
+        # SimTask("gc-20m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1200}),
+        # SimTask("gc-25m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1500}),
+        # SimTask("gc-30m", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 1800}),
+
+        SimTask("gc-40m", {"duration_s": 4200, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 2400}),
+        SimTask("gc-50m", {"duration_s": 4800, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3000}),
+        SimTask("gc-60m", {"duration_s": 5400, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3600}),
+        SimTask("gc-70m", {"duration_s": 6000, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 4200}),
+
+        SimTask("gc-40m", {"duration_s": 4200, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 2400}),
+        SimTask("gc-50m", {"duration_s": 4800, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3000}),
+        SimTask("gc-60m", {"duration_s": 5400, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3600}),
+        SimTask("gc-70m", {"duration_s": 6000, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 4200}),
+
+        SimTask("gc-40m", {"duration_s": 4200, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 2400}),
+        SimTask("gc-50m", {"duration_s": 4800, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3000}),
+        SimTask("gc-60m", {"duration_s": 5400, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3600}),
+        SimTask("gc-70m", {"duration_s": 6000, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 4200}),
+
+        SimTask("gc-40m", {"duration_s": 4200, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 2400}),
+        SimTask("gc-50m", {"duration_s": 4800, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3000}),
+        SimTask("gc-60m", {"duration_s": 5400, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3600}),
+        SimTask("gc-70m", {"duration_s": 6000, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 4200}),
+
+        SimTask("gc-40m", {"duration_s": 4200, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 2400}),
+        SimTask("gc-50m", {"duration_s": 4800, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3000}),
+        SimTask("gc-60m", {"duration_s": 5400, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 3600}),
+        SimTask("gc-70m", {"duration_s": 6000, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 4200}),        
+        # SimTask("gc-no", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300, "hasGC": False}),
+        # SimTask("gc-no", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300, "hasGC": False}),
+        # SimTask("gc-no", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300, "hasGC": False}),
+        # SimTask("gc-no", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300, "hasGC": False}),
+        # SimTask("gc-no", {"duration_s": 3600, "generate_until_min": 20, "rate_per_min": 1.5, "inactive_threshold_s": 300, "hasGC": False}),
     ]
 
     # Ensure namespaces exist up front (optional; workers also ensure)
@@ -333,7 +384,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[NS][WARN] ensure '{t.namespace}' failed: {e}", flush=True)
 
-    pool = SimulatorPool(max_workers=4, log_queue=log_queue)
+    pool = SimulatorPool(max_workers=3, log_queue=log_queue)
     for t in tasks:
         pool.submit(t)
 
