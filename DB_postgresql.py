@@ -149,6 +149,35 @@ def initialize_database():
         );
         """)
 
+        # namespace resource usage Table (네임스페이스 레벨 자원 사용량)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS namespace_resource_usage (
+            id SERIAL PRIMARY KEY,
+            namespace VARCHAR(255) NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cpu_usage_millicores DOUBLE PRECISION,
+            memory_usage_bytes BIGINT,
+            cpu_requests_millicores DOUBLE PRECISION,
+            memory_requests_bytes BIGINT,
+            cpu_limits_millicores DOUBLE PRECISION,
+            memory_limits_bytes BIGINT,
+            running_pod_count INTEGER,
+            pvc_count INTEGER
+        );
+        """)
+
+        # pod resource usage Table (Pod별 자원 사용량)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pod_resource_usage (
+            id SERIAL PRIMARY KEY,
+            pod_name VARCHAR(255) NOT NULL,
+            namespace VARCHAR(255) NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cpu_usage_millicores DOUBLE PRECISION,
+            memory_usage_bytes BIGINT
+        );
+        """)
+
         conn.commit()
 
     except psycopg2.Error as e:
@@ -610,6 +639,73 @@ def update_pod_lifecycle_creation_if_empty(pod_name, namespace, creation_timesta
         if conn:
             conn.rollback()
         logging.error(f"Error updating pod_lifecycle.created_at: {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+def save_namespace_resource_usage(namespace, timestamp, cpu_usage_millicores, memory_usage_bytes,
+                                   cpu_requests_millicores, memory_requests_bytes,
+                                   cpu_limits_millicores, memory_limits_bytes,
+                                   running_pod_count, pvc_count):
+    """네임스페이스 레벨 자원 사용량 저장"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO namespace_resource_usage (
+                namespace, timestamp, cpu_usage_millicores, memory_usage_bytes,
+                cpu_requests_millicores, memory_requests_bytes,
+                cpu_limits_millicores, memory_limits_bytes,
+                running_pod_count, pvc_count
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """, (namespace, timestamp, cpu_usage_millicores, memory_usage_bytes,
+              cpu_requests_millicores, memory_requests_bytes,
+              cpu_limits_millicores, memory_limits_bytes,
+              running_pod_count, pvc_count))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (namespace_resource_usage): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+def save_pod_resource_usage(pod_records):
+    """Pod별 자원 사용량 bulk 저장"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return
+
+        cursor = conn.cursor()
+
+        insert_query = """
+            INSERT INTO pod_resource_usage (
+                pod_name, namespace, timestamp, cpu_usage_millicores, memory_usage_bytes
+            ) VALUES (%s, %s, %s, %s, %s);
+        """
+
+        for record in pod_records:
+            cursor.execute(insert_query, (
+                record['pod_name'], record['namespace'], record['timestamp'],
+                record['cpu_usage_millicores'], record['memory_usage_bytes']
+            ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (pod_resource_usage): {e}")
     finally:
         if conn:
             cursor.close()

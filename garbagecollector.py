@@ -4,6 +4,7 @@ from kubernetes import client, config
 from pod import Pod
 # from processDB import initialize_database
 from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
+from resourceCollector import ResourceCollector
 
 from datetime import datetime, timezone, timedelta
 import time
@@ -22,6 +23,7 @@ class GarbageCollector():
         self.count = 1
         self._stop_event = stop_event or Event()
         self.Inactive_Threshold_s = Inactive_Threshold_s
+        self.resourceCollector = ResourceCollector(self.namespace, self.exclude)
 
     def manage(self, interval=60, worker=10):
         if self.devMode is True:
@@ -31,6 +33,7 @@ class GarbageCollector():
             # self.namespace = 'gc-20m'
             # self.namespace = 'gc-25m'
             self.namespace = 'gc-30m'
+            self.resourceCollector.namespace = self.namespace
         start_anchor = time.perf_counter()  # 고정 기준 시각
         try:
             while True:
@@ -83,6 +86,9 @@ class GarbageCollector():
                             print(f"[ERROR]: {e}")
 
                     print('-' * 50)
+
+                # 리소스 사용량(CPU/Memory) 수집 및 DB 저장
+                self.resourceCollector.collect_and_save()
 
                 self.count += 1
                 if self._stop_event.is_set():
