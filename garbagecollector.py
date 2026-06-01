@@ -66,12 +66,19 @@ class GarbageCollector():
                 elapsed = time.perf_counter() - start_ts
                 print(f"[TIMING] Collected statuses for {len(self.podlist)} pods [{elapsed:.3f}s]")
 
+                # 1단계: 파드 정보 저장 (모든 파드가 아직 살아있는 상태)
                 for p_name, p_obj in self.podlist.items():
                     # print(p_name)
                     # save logging data
                     p_obj.insertPodInfo()
                     p_obj.saveProcessDataToDB()
 
+                # 2단계: 리소스 사용량(CPU/Memory) 수집 및 DB 저장
+                # GC 삭제 전에 수집하여 삭제 대상 파드의 마지막 사용량도 보존
+                self.resourceCollector.collect_and_save()
+
+                # 3단계: GC 판단 및 삭제
+                for p_name, p_obj in self.podlist.items():
                     should_gc, gc_reason, cause = p_obj.shouldGarbageCollection()
 
                     if should_gc:
@@ -86,9 +93,6 @@ class GarbageCollector():
                             print(f"[ERROR]: {e}")
 
                     print('-' * 50)
-
-                # 리소스 사용량(CPU/Memory) 수집 및 DB 저장
-                self.resourceCollector.collect_and_save()
 
                 self.count += 1
                 if self._stop_event.is_set():
@@ -173,6 +177,6 @@ if __name__ == "__main__":
     initialize_database()  # PostgreSQL DB 초기화
 
     #네임스페이스 값을 비워두면 'default'로 지정
-    gc = GarbageCollector(namespace='swlabpods', isDev=True)
+    gc = GarbageCollector(namespace='swlabpods', isDev=False)
     gc.manage()
     # gc.logging()
