@@ -1,0 +1,2 @@
+kubernetes
+psycopg2-binary
