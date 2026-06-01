@@ -1,0 +1,93 @@
+# PostgreSQL(gc-data) 1회성 백업 → NAS 전송 Job
+#
+# 동작: pg_dump(-Fc)로 덤프 → scp(SSH)로 NAS에 전송
+# 정기 백업은 db-backup-cronjob.yaml(매월 1일) 참고.
+#
+# NAS 경로: /SnSLab/cloud_bak/k8s-gc/gc-main/
+#
+# [사전 준비]
+#   1) DB 비밀번호 시크릿 생성 (gc-db-credentials):
+#        kubectl create secret generic gc-db-credentials -n k8s-gc \
+#          --from-literal=password=<DB_PASSWORD>
+#   2) NAS 비밀번호 시크릿을 현재 네임스페이스(k8s-gc)로 복사:
+#        kubectl get secret nas-credentials -n dcucode -o yaml \
+#          | sed 's/namespace: dcucode/namespace: k8s-gc/' \
+#          | kubectl apply -n k8s-gc -f -
+#   3) NAS에 대상 디렉토리가 없으면 미리 생성 (scp는 상위 경로를 만들지 않음):
+#        ssh wldnjs269@203.250.32.43 'mkdir -p /SnSLab/cloud_bak/k8s-gc/gc-main'
+#
+# 실행:  kubectl apply -f deploy/db-backup-job.yaml
+# 로그:  kubectl logs -n k8s-gc -l app=db-backup -f
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-backup
+  namespace: k8s-gc
+  labels:
+    app: db-backup
+spec:
+  backoffLimit: 2                  # 실패 시 최대 2회 재시도
+  ttlSecondsAfterFinished: 86400   # 완료 24시간 후 Job 자동 정리
+  template:
+    metadata:
+      labels:
+        app: db-backup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-backup
+          image: postgres:16-alpine
+          env:
+            # --- DB 접속 (앱과 동일한 외부 NodePort) ---
+            - name: PGHOST
+              value: "203.250.35.87"
+            - name: PGPORT
+              value: "31855"
+            - name: PGUSER
+              value: "k8s_gc"
+            - name: PGDATABASE
+              value: "gc-data"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gc-db-credentials
+                  key: password
+            # --- NAS 접속 (dcucode-db-backup과 동일) ---
+            - name: NAS_HOST
+              value: "203.250.32.43"
+            - name: NAS_USER
+              value: "wldnjs269"
+            - name: NAS_DEST
+              value: "/SnSLab/cloud_bak/k8s-gc/gc-main/"
+            - name: NAS_PW
+              valueFrom:
+                secretKeyRef:
+                  name: nas-credentials   # dcucode에서 복사한 시크릿
+                  key: PW
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache openssh-client sshpass coreutils >/dev/null
+
+              DATE=$(date +%Y%m%d_%H%M%S)
+              DUMP_FILE="/tmp/${PGDATABASE}_${DATE}.dump"
+              trap 'rm -f "$DUMP_FILE"' EXIT
+
+              echo "[backup] dumping ${PGDATABASE} -> ${DUMP_FILE}"
+              pg_dump -F c -f "$DUMP_FILE"
+              echo "[backup] dump done: $(ls -lh $DUMP_FILE)"
+
+              echo "[backup] scp -> ${NAS_USER}@${NAS_HOST}:${NAS_DEST}"
+              sshpass -p "$NAS_PW" scp -o StrictHostKeyChecking=no \
+                "$DUMP_FILE" "${NAS_USER}@${NAS_HOST}:${NAS_DEST}"
+
+              echo "[backup] completed."
+          volumeMounts:
+            - name: tmp-dump
+              mountPath: /tmp
+      volumes:
+        - name: tmp-dump
+          emptyDir: {}
