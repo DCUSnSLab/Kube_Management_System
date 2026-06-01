@@ -12,7 +12,8 @@ from DB_postgresql import (
     get_last_bash_history,
     save_bash_history,
     save_delete_reason,
-    is_deleted_in_DB, is_exist_in_DB
+    is_deleted_in_DB, is_exist_in_DB,
+    update_pod_lifecycle_creation_if_empty
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -77,11 +78,12 @@ class PodActivityPolicy:
 
 
 class Pod:
-    def __init__(self, api, pod):
+    def __init__(self, api, pod, inactive_Threshold_s=PodActivityPolicy.INACTIVE_DURATION_THRESHOLD):
         self.api = api
         self.pod = pod
         self.podName = pod.metadata.name
         self.namespace = pod.metadata.namespace
+        self.Inactive_Threshold_s = inactive_Threshold_s
 
         self.timeBashHistory = None
         self.processes = list()
@@ -126,8 +128,8 @@ class Pod:
     def initPodData(self):
         """새로운 pod가 만들어지면, 초기 데이터 저장"""
         self.insertPodLifecycle()
-        self.insertPodInfo()
         self.savePodLifecycleToDB()
+        self.insertPodInfo()
         self.savePodInfoToDB()
 
     def isDeletedInDB(self):
@@ -163,6 +165,8 @@ class Pod:
         p.startTime = self.pod.status.start_time
 
         self.pod_status = p
+
+        update_pod_lifecycle_creation_if_empty(self.podName, self.namespace, p.creation_timestamp)
 
     def savePodInfoToDB(self):
         """pod's status save to DB"""
@@ -248,7 +252,8 @@ class Pod:
 
     def isActiveFromProcess(self, experiment_id=0):
         classification, summary = self.pm.analyzePodProcess(self.processes)
-
+        IDT = self.Inactive_Threshold_s
+        print('---------------------------------------IDT = ',IDT)
         # 1. 활성 프로세스가 있으면 활성
         current_time = time.time()
         if summary['active'] > 0:
@@ -261,11 +266,11 @@ class Pod:
         elif summary['inactive'] == summary['total']:
             self.podInactiveSince.setdefault(self.podName, current_time)
             inactive_elapsed = current_time - self.podInactiveSince[self.podName]
-            if inactive_elapsed >= PodActivityPolicy.INACTIVE_DURATION_THRESHOLD:
+            if inactive_elapsed >= IDT:
                 status = PodActivityStatus.GC
-                reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {PodActivityPolicy.INACTIVE_DURATION_THRESHOLD / 60:.0f} min)"
+                reason = f"All processes inactive for {inactive_elapsed / 60:.1f} min (≥ {IDT / 60:.0f} min)"
             else:
-                remain = PodActivityPolicy.INACTIVE_DURATION_THRESHOLD - inactive_elapsed
+                remain = IDT - inactive_elapsed
                 status = PodActivityStatus.INACTIVE
                 reason = f"All processes inactive. waiting {remain / 60:.1f} more min to GC"
 
