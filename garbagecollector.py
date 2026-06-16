@@ -78,9 +78,21 @@ class GarbageCollector():
                 self.resourceCollector.collect_and_save()
 
                 # 3단계: GC 판단 및 삭제
-                for p_name, p_obj in self.podlist.items():
-                    should_gc, gc_reason, cause = p_obj.shouldGarbageCollection()
+                decisions = []
+                with ThreadPoolExecutor(max_workers=worker) as executor:
+                    decide_futures = {
+                        executor.submit(p_obj.shouldGarbageCollection): (p_name, p_obj)
+                        for p_name, p_obj in self.podlist.items()
+                    }
+                    for fut in as_completed(decide_futures):
+                        p_name, p_obj = decide_futures[fut]
+                        try:
+                            should_gc, gc_reason, cause = fut.result()
+                            decisions.append((p_name, p_obj, should_gc, gc_reason, cause))
+                        except Exception as e:
+                            print(f"[WARN] Fail to analyze pod {p_name}: {e}")
 
+                for p_name, p_obj, should_gc, gc_reason, cause in decisions:
                     if should_gc:
                         print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
                         print(f"  Reason: {gc_reason}")
@@ -177,6 +189,6 @@ if __name__ == "__main__":
     initialize_database()  # PostgreSQL DB 초기화
 
     #네임스페이스 값을 비워두면 'default'로 지정
-    gc = GarbageCollector(namespace='swlabpods', isDev=False)
+    gc = GarbageCollector(namespace='swlabpods', isDev=False, Inactive_Threshold_s=20 * 60)
     gc.manage()
     # gc.logging()
