@@ -539,9 +539,7 @@ class Pod:
         self.isActiveFromProcess()
 
         # 3. 판단
-        if not self.isActiveResultCommandHistory:
-            return True, 'No usage history for more than a week', 'history'
-        if not self.isActiveResultProcess:
-            return True, self.processStateDescription, 'process'
+        if not self.isActiveResultCommandHistory and not self.isActiveResultProcess:
+            return True, f'No usage history for more than a week & {self.processStateDescription}', 'history+process'
         else:
             return False, 'active', None
