@@ -12,7 +12,10 @@ from multiprocessing import Event
 
 class GarbageCollector():
     def __init__(self, namespace='default', container=None, isDev=False, stop_event=None, Inactive_Threshold_s=None):
-        config.load_kube_config()  # 필수 config값 불러옴
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()  # 필수 config값 불러옴
         self.v1 = client.CoreV1Api()  # api
         self.namespace: str = namespace
         self.container = container
