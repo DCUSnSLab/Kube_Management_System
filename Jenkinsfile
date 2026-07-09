@@ -1,6 +1,6 @@
 // Kube_Management_System (Garbage Collector) — Jenkins Pipeline
 // - main 브랜치만 빌드·푸시·배포, 그 외 브랜치는 Checkout 만 수행
-// - 이미지: harbor.cu.ac.kr/swlabpods/gc
+// - 이미지: harbor.cu.ac.kr/kube_management_system/gc
 // - 배포 대상: k8s-gc 네임스페이스 Deployment/garbage-collector (deploy/gc-deployment.yaml)
 
 pipeline {
@@ -13,7 +13,7 @@ pipeline {
 
     environment {
         REGISTRY   = 'harbor.cu.ac.kr'
-        IMAGE      = 'swlabpods/gc'
+        IMAGE      = 'kube_management_system/gc'
         NAMESPACE  = 'k8s-gc'
         DEPLOYMENT = 'garbage-collector'
     }
