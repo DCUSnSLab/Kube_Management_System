@@ -59,7 +59,7 @@ spec:
       serviceAccountName: garbage-collector
       containers:
         - name: garbage-collector
-          image: harbor.cu.ac.kr/swlabpods/gc:latest
+          image: harbor.cu.ac.kr/kube_management_system/gc:latest
           imagePullPolicy: Always
           resources:
             requests:
