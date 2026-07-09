@@ -40,10 +40,10 @@ class HistoryManager():
             last = int(exec_command.strip())
             return last
         except FileNotFoundError as e:
-            print("File not found")
+            print(f"No bash_history found for pod: {self.pod.metadata.name}")
             return None
         except Exception as e:
-            print(f"occured error: {e}")
+            print(f"bash_history error for pod {self.pod.metadata.name}: {e}")
             return None
 
     def getNowTime(self):

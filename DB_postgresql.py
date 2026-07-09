@@ -178,6 +178,53 @@ def initialize_database():
         );
         """)
 
+        # pod analysis Table (사이클별 파드 단위 프로세스 분석 요약 = summary)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pod_analysis (
+            id SERIAL PRIMARY KEY,
+            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            experiment_id INTEGER,
+            status VARCHAR(20),
+            description TEXT,
+            total INTEGER,
+            active INTEGER,
+            inactive INTEGER,
+            zombie INTEGER
+        );
+        """)
+
+        # Process metrics (/proc/[pid]/status, /proc/[pid]/io) Table (process_data와 1:1)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS process_metrics (
+            id SERIAL PRIMARY KEY,
+            process_data_id INTEGER REFERENCES process_data(id) ON DELETE CASCADE,
+            voluntary_ctxt_switches BIGINT,
+            nonvoluntary_ctxt_switches BIGINT,
+            vm_rss BIGINT,
+            read_bytes BIGINT,
+            write_bytes BIGINT
+        );
+        """)
+
+        # process classification Table (프로세스 단위 활성/비활성 분류 = classification)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS process_classification (
+            id SERIAL PRIMARY KEY,
+            analysis_id INTEGER REFERENCES pod_analysis(id) ON DELETE CASCADE,
+            pid INTEGER,
+            comm VARCHAR(255),
+            state VARCHAR(20),
+            reason VARCHAR(50),
+            cputime_delta BIGINT,
+            ctxt_delta BIGINT,
+            non_ctxt_delta BIGINT,
+            rss_delta BIGINT,
+            minflt_delta BIGINT,
+            io_delta BIGINT
+        );
+        """)
+
         conn.commit()
 
     except psycopg2.Error as e:
@@ -356,13 +403,22 @@ def save_to_process(pod_name, namespace, processes):
             processor, rt_priority, policy, delayacct_blkio_ticks, guest_time, cguest_time, start_data, end_data, start_brk, arg_start,
             arg_end, env_start, env_end, exit_code
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s
-        )
+        ) RETURNING id;
+        """
+
+        insert_metrics = """
+        INSERT INTO process_metrics (
+            process_data_id, voluntary_ctxt_switches, nonvoluntary_ctxt_switches,
+            vm_rss, read_bytes, write_bytes
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s
+        );
         """
 
         for process in processes:
@@ -382,6 +438,13 @@ def save_to_process(pod_name, namespace, processes):
             )
 
             cursor.execute(insert_query, values)
+            process_data_id = cursor.fetchone()[0]
+
+            cursor.execute(insert_metrics, (
+                process_data_id,
+                process['voluntary_ctxt_switches'], process['nonvoluntary_ctxt_switches'],
+                process['vm_rss'], process['read_bytes'], process['write_bytes']
+            ))
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")
@@ -389,6 +452,70 @@ def save_to_process(pod_name, namespace, processes):
         if conn:
             cursor.close()
             conn.close()
+
+
+def save_pod_analysis(pod_name, namespace, analysis):
+    """
+    파드 단위 프로세스 분석 결과 저장 (summary + classification)
+    pod_analysis(부모, summary) 1행 저장 후 그 id로 process_classification(자식) bulk 저장.
+    analysis = {
+        timestamp, experiment_id, status, description,
+        total, active, inactive, zombie,
+        classifications: [{pid, comm, state, reason,
+                           cputime_delta, ctxt_delta, non_ctxt_delta,
+                           rss_delta, minflt_delta, io_delta}, ...]
+    }
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+        INSERT INTO pod_analysis (
+            pod_id, timestamp, experiment_id, status, description,
+            total, active, inactive, zombie
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s
+        ) RETURNING id;
+        """, (
+            pod_id, analysis['timestamp'], analysis['experiment_id'],
+            analysis['status'], analysis['description'],
+            analysis['total'], analysis['active'], analysis['inactive'], analysis['zombie']
+        ))
+        analysis_id = cursor.fetchone()[0]
+
+        insert_classification = """
+        INSERT INTO process_classification (
+            analysis_id, pid, comm, state, reason,
+            cputime_delta, ctxt_delta, non_ctxt_delta, rss_delta, minflt_delta, io_delta
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        );
+        """
+
+        for c in analysis.get('classifications', []):
+            cursor.execute(insert_classification, (
+                analysis_id, c['pid'], c['comm'], c['state'], c['reason'],
+                c['cputime_delta'], c['ctxt_delta'], c['non_ctxt_delta'],
+                c['rss_delta'], c['minflt_delta'], c['io_delta']
+            ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (pod_analysis): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
 
 def save_bash_history(pod_name, namespace, last_modified):
     """bash_history data seve to DB"""

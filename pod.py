@@ -13,7 +13,8 @@ from DB_postgresql import (
     save_bash_history,
     save_delete_reason,
     is_deleted_in_DB, is_exist_in_DB,
-    update_pod_lifecycle_creation_if_empty
+    update_pod_lifecycle_creation_if_empty,
+    save_pod_analysis
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -284,14 +285,50 @@ class Pod:
         self.processStateDescription = reason
 
         timestamp = self.getTimestamp()
-        self.saveStatDataToCSV(timestamp, experiment_id)
+        # self.saveStatDataToCSV(timestamp, experiment_id)
         # self.saveCgroupMetricsToCSV(cgroups, timestamp, experiment_id)
-        self.saveClassificationToCsv(classification, self.podName, experiment_id)
+        # self.saveClassificationToCsv(classification, self.podName, experiment_id)
         summary["status"] = status.value
         summary["description"] = reason
-        self.saveSummaryToCsv(summary, self.podName, experiment_id)
+        # self.saveSummaryToCsv(summary, self.podName, experiment_id)
+        self.savePodAnalysisToDB(classification, summary, timestamp, experiment_id)
         # print("Pod status:", summary["status"])
         return self.isActiveResultProcess
+
+    def savePodAnalysisToDB(self, classification, summary, timestamp, experiment_id=None):
+        """프로세스 분석 결과(summary + classification)를 DB에 저장"""
+        def _state_value(state):
+            return state.value if hasattr(state, "value") else state
+
+        classifications = [
+            {
+                "pid": proc.get("pid"),
+                "comm": proc.get("comm"),
+                "state": _state_value(proc.get("state")),
+                "reason": proc.get("reason"),
+                "cputime_delta": proc.get("CPUtime_delta"),
+                "ctxt_delta": proc.get("ctxt_delta"),
+                "non_ctxt_delta": proc.get("non_ctxt_delta"),
+                "rss_delta": proc.get("rss_delta"),
+                "minflt_delta": proc.get("minflt_delta"),
+                "io_delta": proc.get("io_delta"),
+            }
+            for proc in classification
+        ]
+
+        analysis = {
+            "timestamp": timestamp,
+            "experiment_id": experiment_id,
+            "status": summary.get("status"),
+            "description": summary.get("description"),
+            "total": summary.get("total"),
+            "active": summary.get("active"),
+            "inactive": summary.get("inactive"),
+            "zombie": summary.get("zombie"),
+            "classifications": classifications,
+        }
+
+        save_pod_analysis(self.podName, self.namespace, analysis)
 
     def printProcList(self):
         print('-' * 50)
@@ -395,6 +432,7 @@ class Pod:
             return
 
         for process in self.processes:
+            m = process.metrics
             processes.append({
                 "timestamp": timestamp,
                 "pid": process.pid,
@@ -448,7 +486,12 @@ class Pod:
                 "arg_end": process.arg_end,
                 "env_start": process.env_start,
                 "env_end": process.env_end,
-                "exit_code": process.exit_code
+                "exit_code": process.exit_code,
+                "voluntary_ctxt_switches": m.voluntary_ctxt_switches if m else None,
+                "nonvoluntary_ctxt_switches": m.nonvoluntary_ctxt_switches if m else None,
+                "vm_rss": m.vm_rss if m else None,
+                "read_bytes": m.read_bytes if m else None,
+                "write_bytes": m.write_bytes if m else None
             })
 
         save_to_process(self.podName, self.namespace, processes)

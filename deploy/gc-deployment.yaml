@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: garbage-collector
+  namespace: k8s-gc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garbage-collector
+  namespace: swlabpods
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garbage-collector
+  namespace: swlabpods
+subjects:
+  - kind: ServiceAccount
+    name: garbage-collector
+    namespace: k8s-gc
+roleRef:
+  kind: Role
+  name: garbage-collector
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garbage-collector
+  namespace: k8s-gc
+  labels:
+    app: garbage-collector
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: garbage-collector
+  template:
+    metadata:
+      labels:
+        app: garbage-collector
+    spec:
+      serviceAccountName: garbage-collector
+      containers:
+        - name: garbage-collector
+          image: harbor.cu.ac.kr/swlabpods/gc:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

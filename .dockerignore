@@ -1,0 +1,15 @@
+.git
+.venv
+.idea
+__pycache__
+*.pyc
+error.log
+data
+history
+deploy
+simulator
+sleep_cpu_activity
+pod_generation
+tool
+api_py
+*.log
