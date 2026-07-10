@@ -122,9 +122,3 @@ kubectl -n k8s-gc logs deploy/garbage-collector -f
 2. **Deploy** — `kubectl apply -f deploy/gc-deployment.yaml` → `set image`(불변 태그) → `rollout status`
 
 필요 사항: Harbor 크리덴셜 ID `harbor`, Docker/kubectl 이 설치된 에이전트(`agent any`).
-
-## 알려진 제약
-
-- `~/.bash_history` 가 없는 Pod 는 `exec` 의 `stat` 오류가 로그에 남으며 히스토리상 활성으로 간주된다.
-- Pod 재시작 시 비활성 지속시간(`podInactiveSince`) 등 인메모리 상태가 초기화된다.
-- 병렬 수집 로그가 스레드 간 인터리브되어 출력될 수 있다.
