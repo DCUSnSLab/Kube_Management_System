@@ -3,6 +3,7 @@ from enum import Enum
 
 from poddata import Pod_Info, Pod_Lifecycle, Reason_Deletion
 from historyManager import HistoryManager
+from podexec import HARD_FAILURE_STATUSES
 from processManager import ProcessManager
 from DB_postgresql import (
     save_bash_history_result,
@@ -76,6 +77,8 @@ class PodActivityStatus(Enum):
 class PodActivityPolicy:
     # 예: N=5분, 특정 시간동안 비활성일 경우 GC 대상으로 변경
     INACTIVE_DURATION_THRESHOLD = 30 * 60
+    # exec 하드 실패가 이 횟수만큼 연속되면 GC 대상 (파손 파드 재생성 유도)
+    EXEC_FAIL_GC_THRESHOLD = 2
 
 
 class Pod:
@@ -88,6 +91,9 @@ class Pod:
 
         self.timeBashHistory = None
         self.processes = list()
+        self.historyCollect = None
+        self.processCollect = None
+        self.execFailCount = 0
         self.pod_status = None  # list -> obj
         self.pod_lifecycle = None  # list -> obj
         self.hm = HistoryManager(self.api, self.pod)
@@ -143,7 +149,7 @@ class Pod:
 
     def insertPodInfo(self):
         """pod's status save"""
-        p = Pod_Info
+        p = Pod_Info()
 
         p.uid = self.pod.metadata.uid
         # p.labels = self.pod.metadata.labels
@@ -200,8 +206,10 @@ class Pod:
         """
         Collect process status and bash history info
         """
-        self.timeBashHistory = self.hm.getLastUseTime()
-        self.processes = self.pm.getPorcessData()
+        self.historyCollect = self.hm.collect()
+        self.timeBashHistory = self.historyCollect.mtime
+        self.processCollect = self.pm.collect()
+        self.processes = self.processCollect.processes if self.processCollect.collected else None
         # self.processes = processData['processes']
         # cgroups = processData['cgroups']
 
@@ -565,6 +573,14 @@ class Pod:
                 row = [str(base.get(k, "")) for k in self.SUMMARY_KEYS_ORDER]
                 f.write(",".join(row) + "\n")
 
+    def _collectHardFailures(self):
+        """이번 사이클 수집에서 발생한 하드 exec 실패 상태 목록 반환"""
+        statuses = []
+        for c in (self.historyCollect, self.processCollect):
+            if c is not None and not c.collected and c.exec_status in HARD_FAILURE_STATUSES:
+                statuses.append(c.exec_status)
+        return statuses
+
     def shouldGarbageCollection(self):
         """
         pod가 가비지 컬렉션에 의해 삭제되어야 하는지 판단
@@ -573,8 +589,22 @@ class Pod:
         return:
             - GC 여부: bool
             - 이유: str
-            - 종류(hisotry or process): str
+            - 종류(hisotry or process or exec_failure): str
         """
+        # 0. exec 자체가 실패한 파드 (셸/바이너리 파손, 스토리지 장애 등)
+        #    학생도 접속 불가한 상태이므로 연속 실패 시 삭제해 재생성을 유도
+        fail_statuses = self._collectHardFailures()
+        if fail_statuses:
+            self.execFailCount += 1
+            detail = ",".join(sorted(set(fail_statuses)))
+            if self.execFailCount >= PodActivityPolicy.EXEC_FAIL_GC_THRESHOLD:
+                return True, (f'Pod exec failed {self.execFailCount} consecutive cycles '
+                              f'({detail})'), 'exec_failure'
+            print(f"[EXEC-FAIL] {self.podName}: {detail} "
+                  f"({self.execFailCount}/{PodActivityPolicy.EXEC_FAIL_GC_THRESHOLD})")
+            return False, f'exec failed ({detail}), waiting for retry', None
+        self.execFailCount = 0
+
         # 1. 명령어 히스토리 기반 분석
         self.isActiveFromHistory()
 
