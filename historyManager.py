@@ -1,8 +1,6 @@
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
-from kubernetes import client, config
 
 from podexec import pod_exec, ExecStatus, DEFAULT_EXEC_TIMEOUT
 
@@ -44,9 +42,14 @@ class HistoryManager():
                                      detail=r.stdout[:200])
 
         if r.status is ExecStatus.COMMAND_FAILED:
-            print(f"No bash_history found for pod: {self.pod.metadata.name}")
-            return HistoryResult(collected=True, mtime=None, file_missing=True,
-                                 exec_status="file_missing",
+            if "no such file" in r.stderr.lower():
+                print(f"No bash_history found for pod: {self.pod.metadata.name}")
+                return HistoryResult(collected=True, mtime=None, file_missing=True,
+                                     exec_status="file_missing",
+                                     detail=r.stderr.strip()[:200])
+            print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "
+                  f"command_failed ({r.stderr.strip()[:120]})")
+            return HistoryResult(collected=False, exec_status="command_failed",
                                  detail=r.stderr.strip()[:200])
 
         print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "

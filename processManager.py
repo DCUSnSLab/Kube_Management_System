@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 from process import CgroupMetrics, ProcessMetrics, Process, Mode_State, Policy_State
 from podexec import pod_exec, ExecStatus, DEFAULT_EXEC_TIMEOUT
 
-from kubernetes import client, config, stream
+from kubernetes import client, config
 import time
 
 
@@ -80,13 +80,14 @@ class ProcessManager:
             return ProcessCollection(collected=False, exec_status=r.status.value,
                                      detail=(r.error or r.stderr)[:200])
 
-        if r.status is ExecStatus.COMMAND_FAILED:
+        processes = self.insertProcessStatData(r.stdout)
+
+        if r.status is ExecStatus.COMMAND_FAILED and not processes:
             print(f"[COLLECT-FAIL] {self.pod.metadata.name} proc: "
                   f"partial_toolchain ({r.stderr.strip()[:120]})")
             return ProcessCollection(collected=False, exec_status="partial_toolchain",
                                      detail=r.stderr.strip()[:200])
 
-        processes = self.insertProcessStatData(r.stdout)
         return ProcessCollection(collected=True, processes=processes)
 
     def getPorcessData(self):
@@ -112,8 +113,8 @@ class ProcessManager:
             return []
 
         for line in processStat.splitlines():
-            fields = line.split()
-            if len(fields) < 52:
+            fields = self._splitStatLine(line)
+            if fields is None or len(fields) < 52:
                 continue
 
             try:
@@ -128,6 +129,21 @@ class ProcessManager:
             processes.append(p)
 
         return processes
+
+    @staticmethod
+    def _splitStatLine(line):
+        """comm에 공백/괄호가 포함될 수 있는 /proc/[pid]/stat 라인을 안전하게 분리"""
+        try:
+            lpar = line.index("(")
+            rpar = line.rindex(")")
+        except ValueError:
+            return None
+        pid = line[:lpar].strip()
+        if not pid.isdigit():
+            return None
+        comm = line[lpar + 1:rpar]
+        rest = line[rpar + 1:].split()
+        return [pid, f"({comm})"] + rest
 
     def _parseStatFields(self, fields) -> Process:
         """/proc/[pid]/stat 필드를 Process 객체로 매핑"""

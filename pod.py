@@ -573,13 +573,20 @@ class Pod:
                 row = [str(base.get(k, "")) for k in self.SUMMARY_KEYS_ORDER]
                 f.write(",".join(row) + "\n")
 
-    def _collectHardFailures(self):
-        """이번 사이클 수집에서 발생한 하드 exec 실패 상태 목록 반환"""
-        statuses = []
+    def _collectFailures(self):
+        """이번 사이클 수집 실패를 (하드, 소프트)로 나눠 반환
+        하드: 파드 자체 파손 확정 (binary_missing/storage_fault) -> GC 카운트 대상
+        소프트: 일시 장애 가능 (unreachable/pod_gone 등) -> 사이클 스킵, 카운트 유지
+        """
+        hard, soft = [], []
         for c in (self.historyCollect, self.processCollect):
-            if c is not None and not c.collected and c.exec_status in HARD_FAILURE_STATUSES:
-                statuses.append(c.exec_status)
-        return statuses
+            if c is None or c.collected:
+                continue
+            if c.exec_status in HARD_FAILURE_STATUSES:
+                hard.append(c.exec_status)
+            else:
+                soft.append(c.exec_status)
+        return hard, soft
 
     def shouldGarbageCollection(self):
         """
@@ -593,16 +600,20 @@ class Pod:
         """
         # 0. exec 자체가 실패한 파드 (셸/바이너리 파손, 스토리지 장애 등)
         #    학생도 접속 불가한 상태이므로 연속 실패 시 삭제해 재생성을 유도
-        fail_statuses = self._collectHardFailures()
-        if fail_statuses:
+        hard, soft = self._collectFailures()
+        if hard:
             self.execFailCount += 1
-            detail = ",".join(sorted(set(fail_statuses)))
+            detail = ",".join(sorted(set(hard)))
             if self.execFailCount >= PodActivityPolicy.EXEC_FAIL_GC_THRESHOLD:
                 return True, (f'Pod exec failed {self.execFailCount} consecutive cycles '
                               f'({detail})'), 'exec_failure'
             print(f"[EXEC-FAIL] {self.podName}: {detail} "
                   f"({self.execFailCount}/{PodActivityPolicy.EXEC_FAIL_GC_THRESHOLD})")
             return False, f'exec failed ({detail}), waiting for retry', None
+        if soft:
+            detail = ",".join(sorted(set(soft)))
+            print(f"[EXEC-SOFT-FAIL] {self.podName}: {detail} (cycle skipped)")
+            return False, f'collection failed ({detail}), cycle skipped', None
         self.execFailCount = 0
 
         # 1. 명령어 히스토리 기반 분석

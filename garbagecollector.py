@@ -96,7 +96,20 @@ class GarbageCollector():
                         except Exception as e:
                             print(f"[WARN] Fail to analyze pod {p_name}: {e}")
 
+                exec_fail_deletes = sum(
+                    1 for d in decisions if d[2] and d[4] == 'exec_failure')
+                breaker = (exec_fail_deletes >= 3
+                           and exec_fail_deletes > len(self.podlist) // 2)
+                if breaker:
+                    print(f"[CIRCUIT-BREAKER] {exec_fail_deletes}/{len(self.podlist)} pods "
+                          f"hit exec_failure; suspending exec_failure deletions this cycle "
+                          f"(possible cluster-wide issue)")
+
                 for p_name, p_obj, should_gc, gc_reason, cause in decisions:
+                    if should_gc and cause == 'exec_failure' and breaker:
+                        print(f"[CIRCUIT-BREAKER] skip delete: {p_name}")
+                        print('-' * 50)
+                        continue
                     if should_gc:
                         print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
                         print(f"  Reason: {gc_reason}")
@@ -155,6 +168,8 @@ class GarbageCollector():
             pod_name = p.metadata.name
             pod_status = p.status.phase
             existing = self.podlist.get(pod_name) or self.notRunningPods.get(pod_name)
+            if existing is not None and existing.pod.metadata.uid != p.metadata.uid:
+                existing = None
             if pod_status == "Running":
                 if existing is not None:
                     #기존 Pod객체 재사용 (스냅샷 갱신)

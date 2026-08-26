@@ -1,3 +1,5 @@
+import socket
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
@@ -15,7 +17,11 @@ _BINARY_MISSING_HINTS = (
 )
 _STORAGE_FAULT_HINTS = (
     "input/output error",
+    "stale file handle",
+    "transport endpoint is not connected",
 )
+
+_CONNECT_LOCK = threading.Lock()
 
 
 class ExecStatus(Enum):
@@ -98,7 +104,7 @@ def _classify_status_obj(err_raw: str, stderr: str):
         message_l = message.lower()
         if reason == "NonZeroExitCode":
             code = None
-            for cause in (st.get("details") or {}).get("causes", []):
+            for cause in ((st.get("details") or {}).get("causes") or []):
                 if cause.get("reason") == "ExitCode":
                     try:
                         code = int(cause.get("message"))
@@ -134,17 +140,24 @@ def pod_exec(v1, pod_name: str, namespace: str, command,
         kwargs["container"] = container
 
     try:
-        ws = stream.stream(v1.connect_get_namespaced_pod_exec, pod_name, namespace, **kwargs)
+        with _CONNECT_LOCK:
+            prev_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(timeout)
+            try:
+                ws = stream.stream(v1.connect_get_namespaced_pod_exec,
+                                   pod_name, namespace, **kwargs)
+            finally:
+                socket.setdefaulttimeout(prev_timeout)
     except Exception as e:
         st, chain = _classify_connect_error(e)
         return ExecResult(status=st, error=chain[-1] if chain else str(e), chain=chain)
 
     try:
         ws.run_forever(timeout=timeout)
-        timed_out = ws.is_open()
         stdout = ws.read_channel(STDOUT_CHANNEL) or ""
         stderr = ws.read_channel(STDERR_CHANNEL) or ""
         err_raw = ws.read_channel(ERROR_CHANNEL) or ""
+        timed_out = ws.is_open() and not err_raw
     except Exception as e:
         chain = _exc_chain(e)
         return ExecResult(status=ExecStatus.UNREACHABLE, error=chain[0], chain=chain)
@@ -165,6 +178,4 @@ def pod_exec(v1, pod_name: str, namespace: str, command,
 HARD_FAILURE_STATUSES = frozenset(s.value for s in (
     ExecStatus.BINARY_MISSING,
     ExecStatus.STORAGE_FAULT,
-    ExecStatus.UNREACHABLE,
-    ExecStatus.POD_GONE,
 ))
