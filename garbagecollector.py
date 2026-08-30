@@ -22,6 +22,7 @@ class GarbageCollector():
         self.devMode: bool = isDev
         self.exclude: list = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
         self.podlist: dict = {}
+        self.notRunningPods: dict = {}
         self.intervalTime = 60
         self.count = 1
         self._stop_event = stop_event or Event()
@@ -95,7 +96,20 @@ class GarbageCollector():
                         except Exception as e:
                             print(f"[WARN] Fail to analyze pod {p_name}: {e}")
 
+                exec_fail_deletes = sum(
+                    1 for d in decisions if d[2] and d[4] == 'exec_failure')
+                breaker = (exec_fail_deletes >= 3
+                           and exec_fail_deletes > len(self.podlist) // 2)
+                if breaker:
+                    print(f"[CIRCUIT-BREAKER] {exec_fail_deletes}/{len(self.podlist)} pods "
+                          f"hit exec_failure; suspending exec_failure deletions this cycle "
+                          f"(possible cluster-wide issue)")
+
                 for p_name, p_obj, should_gc, gc_reason, cause in decisions:
+                    if should_gc and cause == 'exec_failure' and breaker:
+                        print(f"[CIRCUIT-BREAKER] skip delete: {p_name}")
+                        print('-' * 50)
+                        continue
                     if should_gc:
                         print(f"\n[Garbage Collector] Pod '{p_name}' will be deleted")
                         print(f"  Reason: {gc_reason}")
@@ -135,8 +149,9 @@ class GarbageCollector():
         pods = self.v1.list_namespaced_pod(self.namespace).items
         if not pods:
             print(f"No resources found in {self.namespace} namespace.")
-            self.recordDeletedPod(self.podlist)
+            self.recordDeletedPod(set(self.podlist.keys()) | set(self.notRunningPods.keys()))
             self.podlist = {}
+            self.notRunningPods = {}
             return
 
         #제외할 pod 필터링
@@ -148,14 +163,18 @@ class GarbageCollector():
             )
         ]
         new_podlist = {}
+        new_not_running = {}
         for p in filtering_pods:
             pod_name = p.metadata.name
             pod_status = p.status.phase
-            # print('---',pod_name, pod_status)
+            existing = self.podlist.get(pod_name) or self.notRunningPods.get(pod_name)
+            if existing is not None and existing.pod.metadata.uid != p.metadata.uid:
+                existing = None
             if pod_status == "Running":
-                if pod_name in self.podlist:
-                    #기존 Pod객체 재사용
-                    new_podlist[pod_name] = self.podlist[pod_name]
+                if existing is not None:
+                    #기존 Pod객체 재사용 (스냅샷 갱신)
+                    existing.pod = p
+                    new_podlist[pod_name] = existing
                 else:
                     core_api = client.CoreV1Api()
                     new_podlist[pod_name] = Pod(core_api, p, self.Inactive_Threshold_s)
@@ -164,12 +183,38 @@ class GarbageCollector():
                     if not pod_obj.isExistInDB() or pod_obj.isDeletedInDB():
                         print(f"Initializing new pod: {pod_name}")
                         pod_obj.initPodData()
+            else:
+                # Running이 아닌 파드도 추적 (시작 실패/파손 파드가 시야에서 사라지는 것 방지)
+                print(f"[NOT-RUNNING] {pod_name} phase={pod_status}{self.describePodState(p)}")
+                if existing is not None:
+                    existing.pod = p
+                    new_not_running[pod_name] = existing
+                else:
+                    core_api = client.CoreV1Api()
+                    pod_obj = Pod(core_api, p, self.Inactive_Threshold_s)
+                    new_not_running[pod_name] = pod_obj
+                    if not pod_obj.isExistInDB() or pod_obj.isDeletedInDB():
+                        print(f"Initializing new pod: {pod_name}")
+                        pod_obj.initPodData()
 
-        removed_pod = set(self.podlist.keys()) - set(new_podlist.keys())
-        self.recordDeletedPod(removed_pod)
+        known = set(self.podlist.keys()) | set(self.notRunningPods.keys())
+        still_present = set(new_podlist.keys()) | set(new_not_running.keys())
+        self.recordDeletedPod(known - still_present)
 
         # 새로운 목록으로 변경
         self.podlist = new_podlist
+        self.notRunningPods = new_not_running
+
+    def describePodState(self, p):
+        """컨테이너 waiting/terminated 사유를 로그용 문자열로 반환"""
+        reasons = []
+        for cs in (p.status.container_statuses or []):
+            st = cs.state
+            if st and st.waiting and st.waiting.reason:
+                reasons.append(f"{cs.name}:{st.waiting.reason}")
+            elif st and st.terminated and st.terminated.reason:
+                reasons.append(f"{cs.name}:{st.terminated.reason}")
+        return f" ({', '.join(reasons)})" if reasons else ""
 
     def recordDeletedPod(self, removed_pods):
         """
@@ -177,9 +222,12 @@ class GarbageCollector():
         Reason is 'UNKOWN' when pod is deleted
         """
         for rm_p in removed_pods:
-            pod_obj = self.podlist[rm_p]
+            pod_obj = self.podlist.get(rm_p) or self.notRunningPods.get(rm_p)
+            if pod_obj is None:
+                continue
             if not pod_obj.isDeletedInDB():  # DB에 삭제된 시간이 없는 경우만 처리
-                pod_obj.insert_DeleteReason("UNKNOWN - Pod deleted")
+                last_phase = getattr(pod_obj.pod.status, "phase", None)
+                pod_obj.insert_DeleteReason(f"UNKNOWN - Pod deleted (last_phase={last_phase})")
                 pod_obj.save_DeleteReason_to_DB()
             print(f"Pod removed: {rm_p}")
 

@@ -225,6 +225,20 @@ def initialize_database():
         );
         """)
 
+        # exec failure Table (수집 실패 사이클만 기록, 파손 파드 이력 추적용)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pod_exec_failure (
+            id SERIAL PRIMARY KEY,
+            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            history_status VARCHAR(30),
+            process_status VARCHAR(30),
+            severity VARCHAR(10),
+            fail_count INTEGER,
+            detail TEXT
+        );
+        """)
+
         conn.commit()
 
     except psycopg2.Error as e:
@@ -511,6 +525,48 @@ def save_pod_analysis(pod_name, namespace, analysis):
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error (pod_analysis): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def save_pod_exec_failure(pod_name, namespace, record):
+    """
+    exec 수집 실패 상태 저장 (실패 사이클만 기록)
+    record = {
+        timestamp, history_status, process_status,
+        severity(hard|soft), fail_count, detail
+    }
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+        INSERT INTO pod_exec_failure (
+            pod_id, timestamp, history_status, process_status,
+            severity, fail_count, detail
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s
+        );
+        """, (
+            pod_id, record['timestamp'], record['history_status'],
+            record['process_status'], record['severity'],
+            record['fail_count'], record['detail']
+        ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (pod_exec_failure): {e}")
     finally:
         if conn:
             cursor.close()

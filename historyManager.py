@@ -1,18 +1,68 @@
-import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from kubernetes import client, config, stream
+from typing import Optional
+
+from podexec import pod_exec, ExecStatus, DEFAULT_EXEC_TIMEOUT
+
+
+@dataclass
+class HistoryResult:
+    collected: bool
+    mtime: Optional[int] = None
+    file_missing: bool = False
+    exec_status: str = ""
+    detail: str = ""
 
 
 class HistoryManager():
-    def __init__(self, api_instance, pod):
+    def __init__(self, api_instance, pod, exec_timeout=DEFAULT_EXEC_TIMEOUT):
         self.file = "/home/dcuuser/.bash_history"
         self.v1 = api_instance
         self.pod = pod
         self.namespace = pod.metadata.namespace
+        self.exec_timeout = exec_timeout
+
+    def collect(self) -> HistoryResult:
+        """
+        .bash_history의 mtime을 수집하고 exec 실패 원인을 구분해 반환
+            collected=True, mtime=int   : 수집 성공
+            collected=True, mtime=None  : stat은 실행됐고 파일만 없음 (file_missing)
+            collected=False             : exec 실패 (exec_status에 원인 분류)
+        """
+        r = pod_exec(self.v1, self.pod.metadata.name, self.namespace,
+                     ["stat", "-c", "%Y", self.file], timeout=self.exec_timeout)
+
+        if r.status is ExecStatus.OK:
+            try:
+                return HistoryResult(collected=True, mtime=int(r.stdout.strip()))
+            except ValueError:
+                print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "
+                      f"parse_error ({r.stdout[:120]!r})")
+                return HistoryResult(collected=False, exec_status="parse_error",
+                                     detail=r.stdout[:200])
+
+        if r.status is ExecStatus.COMMAND_FAILED:
+            if "no such file" in r.stderr.lower():
+                print(f"No bash_history found for pod: {self.pod.metadata.name}")
+                return HistoryResult(collected=True, mtime=None, file_missing=True,
+                                     exec_status="file_missing",
+                                     detail=r.stderr.strip()[:200])
+            print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "
+                  f"command_failed ({r.stderr.strip()[:120]})")
+            return HistoryResult(collected=False, exec_status="command_failed",
+                                 detail=r.stderr.strip()[:200])
+
+        print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "
+              f"{r.status.value} ({(r.error or r.stderr)[:120]})")
+        return HistoryResult(collected=False, exec_status=r.status.value,
+                             detail=(r.error or r.stderr)[:200])
+
+    def getLastUseTime(self):
+        """하위호환: 성공 시 mtime(int), 그 외 None"""
+        return self.collect().mtime
 
     def analyze(self, filetime):
         # 사용하지않는다고 판단하면 false
-        # filetime = self.getLastUseTime()
         if filetime == None:
             # file이 없는경우
             # 접속을 했으나, 사용중이거나 제대로 종료하지않으면 파일이 없음
@@ -26,39 +76,17 @@ class HistoryManager():
         else:
             return True
 
-    def getLastUseTime(self):
-        # last = os.path.getmtime(self.file)
-        # 유닉스
-        command = ["stat", "-c", "%Y", self.file]
-        try:
-            exec_command = stream.stream(self.v1.connect_get_namespaced_pod_exec,
-                                         self.pod.metadata.name,
-                                         self.namespace,
-                                         command=command,
-                                         stderr=True, stdin=False,
-                                         stdout=True, tty=False)
-            last = int(exec_command.strip())
-            return last
-        except FileNotFoundError as e:
-            print(f"No bash_history found for pod: {self.pod.metadata.name}")
-            return None
-        except Exception as e:
-            print(f"bash_history error for pod {self.pod.metadata.name}: {e}")
-            return None
-
     def getNowTime(self):
         # 현재 시스템은 utc기준
         now = datetime.now().timestamp()
         return now
 
     def compareTime(self, last_time):
-        # print("Compare....")
         now_time = self.getNowTime()
         diff_time = now_time - last_time
 
         year, month, day = self.convertDay(diff_time)
         hour, minute, second = self.convertTime(diff_time)
-        # print('-' * 50)
         print(f"Compare time : {year}-{month}-{day} {hour}:{minute}:{second}")
         return year, month, day
 
