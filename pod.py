@@ -15,7 +15,8 @@ from DB_postgresql import (
     save_delete_reason,
     is_deleted_in_DB, is_exist_in_DB,
     update_pod_lifecycle_creation_if_empty,
-    save_pod_analysis
+    save_pod_analysis,
+    save_pod_exec_failure
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -588,6 +589,28 @@ class Pod:
                 soft.append(c.exec_status)
         return hard, soft
 
+    def saveExecStatusToDB(self, severity):
+        """exec 수집 실패 상태를 DB에 저장 (실패 사이클만)"""
+        def _status(c):
+            if c is None:
+                return None
+            return c.exec_status or "ok"
+
+        detail = "; ".join(
+            f"{name}: {c.detail}"
+            for name, c in (("history", self.historyCollect), ("process", self.processCollect))
+            if c is not None and not c.collected and c.detail
+        )
+        record = {
+            "timestamp": self.getTimestamp(),
+            "history_status": _status(self.historyCollect),
+            "process_status": _status(self.processCollect),
+            "severity": severity,
+            "fail_count": self.execFailCount,
+            "detail": detail[:500],
+        }
+        save_pod_exec_failure(self.podName, self.namespace, record)
+
     def shouldGarbageCollection(self):
         """
         pod가 가비지 컬렉션에 의해 삭제되어야 하는지 판단
@@ -604,6 +627,7 @@ class Pod:
         if hard:
             self.execFailCount += 1
             detail = ",".join(sorted(set(hard)))
+            self.saveExecStatusToDB("hard")
             if self.execFailCount >= PodActivityPolicy.EXEC_FAIL_GC_THRESHOLD:
                 return True, (f'Pod exec failed {self.execFailCount} consecutive cycles '
                               f'({detail})'), 'exec_failure'
@@ -612,6 +636,7 @@ class Pod:
             return False, f'exec failed ({detail}), waiting for retry', None
         if soft:
             detail = ",".join(sorted(set(soft)))
+            self.saveExecStatusToDB("soft")
             print(f"[EXEC-SOFT-FAIL] {self.podName}: {detail} (cycle skipped)")
             return False, f'collection failed ({detail}), cycle skipped', None
         self.execFailCount = 0
