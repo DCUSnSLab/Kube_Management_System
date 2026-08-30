@@ -68,3 +68,14 @@ spec:
             limits:
               cpu: "1"
               memory: "1Gi"
+          volumeMounts:
+            # 이미지에 포함된 더미 config.ini를 실제 DB 접속 정보(Secret)로 덮어씀
+            # Secret 생성: kubectl -n k8s-gc create secret generic gc-db-config --from-file=config.ini=<실제 config.ini>
+            - name: db-config
+              mountPath: /app/config.ini
+              subPath: config.ini
+              readOnly: true
+      volumes:
+        - name: db-config
+          secret:
+            secretName: gc-db-config
