@@ -22,8 +22,10 @@ DATABASE_CONFIG = {
 def get_db_connection():
     """PostgreSQL connect DB"""
     try:
-        return psycopg2.connect(**DATABASE_CONFIG)
+        return psycopg2.connect(**DATABASE_CONFIG, connect_timeout=10)
     except psycopg2.Error as e:
+        print(f"[DB-ERROR] connection failed "
+              f"(host={DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}): {e}", flush=True)
         logging.error(f"Database connection error: {e}")
         return None
 
