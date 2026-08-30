@@ -35,6 +35,9 @@ class ProcessStatePolicy:
     NON_VOLUNTARY_CTXT_SWITCH_DELTA_THRESHOLD = 158  # Non-Voluntary Context Switch 임계치
 
 
+# /proc 스캔은 프로세스 수에 비례해 오래 걸릴 수 있어 별도 타임아웃 적용
+PROC_SCAN_TIMEOUT = 30
+
 _PROC_STAT_COMMAND = [
     "sh", "-c",
     "SELF_PID=$$ && "
@@ -55,11 +58,13 @@ _PROC_STAT_COMMAND = [
 
 
 class ProcessManager:
-    def __init__(self, api_instance, pod, exec_timeout=DEFAULT_EXEC_TIMEOUT):
+    def __init__(self, api_instance, pod, exec_timeout=DEFAULT_EXEC_TIMEOUT,
+                 proc_scan_timeout=PROC_SCAN_TIMEOUT):
         self.v1 = api_instance
         self.pod = pod
         self.namespace: str = pod.metadata.namespace
         self.exec_timeout = exec_timeout
+        self.proc_scan_timeout = proc_scan_timeout
 
         self.previous_states: dict = {}  # pod별 이전 통계 저장하는 딕셔너리
         self.podInactiveSince: Dict[str, float] = {}  # pod 비활성 시작 시간 저장 (name, time)
@@ -72,7 +77,7 @@ class ProcessManager:
             collected=False : exec 실패 (exec_status에 원인 분류)
         """
         r = pod_exec(self.v1, self.pod.metadata.name, self.namespace,
-                     _PROC_STAT_COMMAND, timeout=self.exec_timeout)
+                     _PROC_STAT_COMMAND, timeout=self.proc_scan_timeout)
 
         if not r.reachable:
             print(f"[COLLECT-FAIL] {self.pod.metadata.name} proc: "
