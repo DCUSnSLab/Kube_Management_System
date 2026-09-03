@@ -439,7 +439,7 @@ def save_to_process(pod_name, namespace, processes):
 
         for process in processes:
             values = (
-                pod_id, process['timestamp'], process['pid'], process['comm'], process['state'],
+                pod_id, process['timestamp'], process['pid'], (process['comm'] or '')[:255], process['state'],
                 process['ppid'], process['pgrp'], process['session'], process['tty_nr'], process['tpgid'],
                 process['flags'], process['minflt'], process['cminflt'], process['majflt'], process['cmajflt'],
                 process['utime'], process['stime'], process['cutime'], process['cstime'], process['priority'],
@@ -519,7 +519,7 @@ def save_pod_analysis(pod_name, namespace, analysis):
 
         for c in analysis.get('classifications', []):
             cursor.execute(insert_classification, (
-                analysis_id, c['pid'], c['comm'], c['state'], c['reason'],
+                analysis_id, c['pid'], (c['comm'] or '')[:255], c['state'], c['reason'],
                 c['cputime_delta'], c['ctxt_delta'], c['non_ctxt_delta'],
                 c['rss_delta'], c['minflt_delta'], c['io_delta']
             ))
