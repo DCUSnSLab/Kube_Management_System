@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volume-reaper
+  namespace: k8s-gc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: volume-reaper
+  namespace: swlabpods
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: volume-reaper
+  namespace: swlabpods
+subjects:
+  - kind: ServiceAccount
+    name: volume-reaper
+    namespace: k8s-gc
+roleRef:
+  kind: Role
+  name: volume-reaper
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: volume-reaper-longhorn
+  namespace: longhorn-system
+rules:
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: volume-reaper-longhorn
+  namespace: longhorn-system
+subjects:
+  - kind: ServiceAccount
+    name: volume-reaper
+    namespace: k8s-gc
+roleRef:
+  kind: Role
+  name: volume-reaper-longhorn
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: volume-reaper
+  namespace: k8s-gc
+spec:
+  schedule: "30 19 * * *"   # UTC 19:30 = KST 04:30
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          serviceAccountName: volume-reaper
+          restartPolicy: Never
+          containers:
+            - name: volume-reaper
+              image: harbor.cu.ac.kr/kube_management_system/gc:latest
+              imagePullPolicy: Always
+              command: ["python", "volumeReaper.py"]
+              env:
+                - name: REAPER_STALE_DAYS
+                  value: "90"
+                - name: REAPER_MAX_DELETE
+                  value: "20"
+                # 기본 report-only. 실제 삭제하려면 REAPER_DELETE=true 추가
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+              volumeMounts:
+                - name: db-config
+                  mountPath: /app/config.ini
+                  subPath: config.ini
+                  readOnly: true
+          volumes:
+            - name: db-config
+              secret:
+                secretName: gc-db-config
