@@ -227,6 +227,22 @@ def initialize_database():
         );
         """)
 
+        # volume reap log Table (미사용 볼륨 회수 후보/삭제 이력)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS volume_reap_log (
+            id SERIAL PRIMARY KEY,
+            pvc_name VARCHAR(255) NOT NULL,
+            namespace VARCHAR(255),
+            size_gi DOUBLE PRECISION,
+            last_pod_ref_at TIMESTAMP,
+            action VARCHAR(10),
+            detail TEXT,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (pvc_name, action)
+        );
+        """)
+
         # exec failure Table (수집 실패 사이클만 기록, 파손 파드 이력 추적용)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS pod_exec_failure (
@@ -527,6 +543,67 @@ def save_pod_analysis(pod_name, namespace, analysis):
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error (pod_analysis): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def get_pod_deleted_map(namespace):
+    """네임스페이스의 파드별 마지막 삭제 시각 조회 (pod_name -> deleted_at)"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return {}
+
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT i.pod_name, max(l.deleted_at)
+        FROM pod_lifecycle l JOIN pod_info i ON l.pod_id = i.pod_id
+        WHERE i.namespace = %s AND l.deleted_at IS NOT NULL
+        GROUP BY i.pod_name;
+        """, (namespace,))
+        return dict(cursor.fetchall())
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (pod_deleted_map): {e}")
+        return {}
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def save_volume_reap(pvc_name, namespace, size_gi, last_pod_ref_at, action, detail=""):
+    """
+    볼륨 회수 이력 저장 (action: report | deleted | skipped | error)
+    (pvc_name, action) 단위로 1행 유지, 재발생 시 last_seen만 갱신
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT INTO volume_reap_log (
+            pvc_name, namespace, size_gi, last_pod_ref_at, action, detail
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (pvc_name, action) DO UPDATE
+            SET last_seen = CURRENT_TIMESTAMP,
+                last_pod_ref_at = EXCLUDED.last_pod_ref_at,
+                size_gi = EXCLUDED.size_gi,
+                detail = EXCLUDED.detail;
+        """, (pvc_name, namespace, size_gi, last_pod_ref_at, action, detail))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (volume_reap_log): {e}")
     finally:
         if conn:
             cursor.close()

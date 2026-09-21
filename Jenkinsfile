@@ -58,6 +58,7 @@ pipeline {
 
                     # RBAC(SA/Role/RoleBinding) + Deployment 보장. 이미 있으면 unchanged.
                     kubectl apply -f deploy/gc-deployment.yaml
+                    kubectl apply -f deploy/volume-reaper-cronjob.yaml
 
                     # 이미지 태그 교체 (latest → BUILD_NUMBER-GIT_SHA) 로 롤아웃 트리거
                     kubectl -n ${NAMESPACE} set image deployment/${DEPLOYMENT} \\
