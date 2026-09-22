@@ -83,7 +83,8 @@ spec:
                   value: "90"
                 - name: REAPER_MAX_DELETE
                   value: "20"
-                # 기본 report-only. 실제 삭제하려면 REAPER_DELETE=true 추가
+                - name: REAPER_DELETE
+                  value: "true"
               resources:
                 requests:
                   cpu: "100m"
