@@ -437,7 +437,7 @@ class ProcessManager:
             이전 계산 값이 없을 경우 None 반환
         """
         deltas = {}
-        deltas['CPUtime'] = (p.utime + p.stime) - (prev.get('utime', 0) + prev.get('stime', 0))
+        deltas['CPUtime'] = (p.utime + p.stime) - prev.get('CPUtime', 0)
         deltas['voluntary_ctxt'] = (p.metrics.voluntary_ctxt_switches or 0) - prev.get('voluntary_ctxt', 0)
         deltas['nonvoluntary_ctxt'] = (p.metrics.nonvoluntary_ctxt_switches or 0) - prev.get('nonvoluntary_ctxt', 0)
         deltas['rss'] = (p.rss or 0) - prev.get('rss', 0)
