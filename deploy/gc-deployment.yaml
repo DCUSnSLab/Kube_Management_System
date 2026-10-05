@@ -61,6 +61,9 @@ spec:
         - name: garbage-collector
           image: harbor.cu.ac.kr/kube_management_system/gc:latest
           imagePullPolicy: Always
+          env:
+            - name: GC_DELETE
+              value: "true"
           resources:
             requests:
               cpu: "200m"

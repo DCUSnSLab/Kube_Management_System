@@ -7,6 +7,7 @@ from DB_postgresql import initialize_database, is_deleted_in_DB, is_exist_in_DB
 from resourceCollector import ResourceCollector
 
 from datetime import datetime, timezone, timedelta
+import os
 import time
 from multiprocessing import Event
 
@@ -27,6 +28,7 @@ class GarbageCollector():
         self.count = 1
         self._stop_event = stop_event or Event()
         self.Inactive_Threshold_s = Inactive_Threshold_s
+        self.deleteEnabled = os.getenv("GC_DELETE", "true").lower() in ("1", "true", "yes")
         self.resourceCollector = ResourceCollector(self.namespace, self.exclude)
 
     def manage(self, interval=60, worker=10):
@@ -38,6 +40,7 @@ class GarbageCollector():
             # self.namespace = 'gc-25m'
             self.namespace = 'gc-30m'
             self.resourceCollector.namespace = self.namespace
+        print(f"[GC] delete mode: {'ENABLED' if self.deleteEnabled else 'DRY-RUN (observe only)'}")
         start_anchor = time.perf_counter()  # 고정 기준 시각
         try:
             while True:
@@ -108,6 +111,12 @@ class GarbageCollector():
                 for p_name, p_obj, should_gc, gc_reason, cause in decisions:
                     if should_gc and cause == 'exec_failure' and breaker:
                         print(f"[CIRCUIT-BREAKER] skip delete: {p_name}")
+                        p_obj.saveGcDecisionToDB(cause, gc_reason, self.deleteEnabled, False, "circuit_breaker")
+                        print('-' * 50)
+                        continue
+                    if should_gc and not self.deleteEnabled:
+                        print(f"[DRY-RUN] Pod '{p_name}' would be deleted ({cause}): {gc_reason}")
+                        p_obj.saveGcDecisionToDB(cause, gc_reason, False, False, "dry_run")
                         print('-' * 50)
                         continue
                     if should_gc:
@@ -118,8 +127,10 @@ class GarbageCollector():
                             self.deletePod(p_name)  # pod 삭제
                             p_obj.insert_DeleteReason(gc_reason)
                             p_obj.save_DeleteReason_to_DB()
+                            p_obj.saveGcDecisionToDB(cause, gc_reason, True, True, "")
                         except Exception as e:
                             print(f"[ERROR]: {e}")
+                            p_obj.saveGcDecisionToDB(cause, gc_reason, True, False, str(e)[:200])
 
                     print('-' * 50)
 

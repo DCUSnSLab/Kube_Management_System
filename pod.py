@@ -16,7 +16,8 @@ from DB_postgresql import (
     is_deleted_in_DB, is_exist_in_DB,
     update_pod_lifecycle_creation_if_empty,
     save_pod_analysis,
-    save_pod_exec_failure
+    save_pod_exec_failure,
+    save_gc_decision
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -610,6 +611,17 @@ class Pod:
             "detail": detail[:500],
         }
         save_pod_exec_failure(self.podName, self.namespace, record)
+
+    def saveGcDecisionToDB(self, cause, reason, delete_enabled, executed, note=""):
+        """GC 삭제 판정 기록 (dry-run·서킷브레이커 스킵 포함)"""
+        save_gc_decision(self.podName, self.namespace, {
+            "timestamp": self.getTimestamp(),
+            "cause": cause,
+            "reason": reason,
+            "delete_enabled": delete_enabled,
+            "executed": executed,
+            "note": note,
+        })
 
     def shouldGarbageCollection(self):
         """

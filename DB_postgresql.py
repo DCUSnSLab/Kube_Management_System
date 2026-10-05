@@ -243,6 +243,20 @@ def initialize_database():
         );
         """)
 
+        # gc decision Table (삭제 판정 이력: 실제 삭제, dry-run, 서킷브레이커 스킵)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS gc_decision (
+            id SERIAL PRIMARY KEY,
+            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cause VARCHAR(30),
+            reason TEXT,
+            delete_enabled BOOLEAN,
+            executed BOOLEAN,
+            note TEXT
+        );
+        """)
+
         # exec failure Table (수집 실패 사이클만 기록, 파손 파드 이력 추적용)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS pod_exec_failure (
@@ -604,6 +618,43 @@ def save_volume_reap(pvc_name, namespace, size_gi, last_pod_ref_at, action, deta
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error (volume_reap_log): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def save_gc_decision(pod_name, namespace, record):
+    """
+    GC 삭제 판정 저장
+    record = {timestamp, cause, reason, delete_enabled, executed, note}
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+        INSERT INTO gc_decision (
+            pod_id, timestamp, cause, reason, delete_enabled, executed, note
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s
+        );
+        """, (
+            pod_id, record['timestamp'], record['cause'], record['reason'],
+            record['delete_enabled'], record['executed'], record['note']
+        ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        logging.error(f"PostgreSQL Error (gc_decision): {e}")
     finally:
         if conn:
             cursor.close()
