@@ -68,10 +68,10 @@ class HistoryManager():
             # 접속을 했으나, 사용중이거나 제대로 종료하지않으면 파일이 없음
             return True
         y, m, d = self.compareTime(filetime)
-        # 7일이상 경과 시 False
+        # 8일이상 경과 시 False
         if y > 0 or m > 0:
             return False
-        if d > 7:
+        if d >= 8:
             return False
         else:
             return True
