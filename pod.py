@@ -218,9 +218,11 @@ class Pod:
     def isActiveFromHistory(self) -> bool:
         """
         return True or False
-            7일 이상 경과시 비활성 -> False
+            8일 이상 경과시 비활성 -> False
         """
         result = self.hm.analyze(self.timeBashHistory)
+        if self.historyCollect is not None and self.historyCollect.file_missing:
+            result = False
         # print(result)
 
         # pod_lifecycle에 리스토리 검사 결과 저장
@@ -230,7 +232,7 @@ class Pod:
             lastTimeStamp_Bash_history = self.hm.checkTimestamp(self.timeBashHistory)
             self.saveCommandHistoryToDB(lastTimeStamp_Bash_history)
 
-        # 7일이상 사용하지 않으면 false 반환
+        # 8일이상 사용하지 않으면 false 반환
         if not result and self.checkCreateTime():
             self.isActiveResultCommandHistory = False
         else:
@@ -254,11 +256,11 @@ class Pod:
 
     def checkCreateTime(self):
         """
-        pod 생성된 지 7일이 지났는지 확인 후 반환
+        pod 생성된 지 8일이 지났는지 확인 후 반환
         """
         creation_time = self.pod_status.creation_timestamp
         now = datetime.now(creation_time.tzinfo)
-        result = (now - creation_time) > timedelta(days=7)
+        result = (now - creation_time) >= timedelta(days=8)
         return result
 
     def isActiveFromProcess(self, experiment_id=0):
@@ -661,6 +663,6 @@ class Pod:
 
         # 3. 판단
         if not self.isActiveResultCommandHistory and not self.isActiveResultProcess:
-            return True, f'No usage history for more than a week & {self.processStateDescription}', 'history+process'
+            return True, f'No usage history for 8+ days & {self.processStateDescription}', 'history+process'
         else:
             return False, 'active', None
