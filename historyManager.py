@@ -1,8 +1,11 @@
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
 from podexec import pod_exec, ExecStatus, DEFAULT_EXEC_TIMEOUT
+
+DEFAULT_HISTORY_FILES = "/home/dcuuser/.bash_history,/root/.bash_history"
 
 
 @dataclass
@@ -16,7 +19,8 @@ class HistoryResult:
 
 class HistoryManager():
     def __init__(self, api_instance, pod, exec_timeout=DEFAULT_EXEC_TIMEOUT):
-        self.file = "/home/dcuuser/.bash_history"
+        self.files = [f.strip() for f in os.getenv("GC_HISTORY_FILES", DEFAULT_HISTORY_FILES).split(",") if f.strip()]
+        self.file = self.files[0]
         self.v1 = api_instance
         self.pod = pod
         self.namespace = pod.metadata.namespace
@@ -24,24 +28,23 @@ class HistoryManager():
 
     def collect(self) -> HistoryResult:
         """
-        .bash_history의 mtime을 수집하고 exec 실패 원인을 구분해 반환
+        후보 경로(dcuuser, root)의 .bash_history mtime 중 최신값을 수집하고 exec 실패 원인을 구분해 반환
             collected=True, mtime=int   : 수집 성공
-            collected=True, mtime=None  : stat은 실행됐고 파일만 없음 (file_missing)
+            collected=True, mtime=None  : stat은 실행됐고 파일이 모두 없음 (file_missing)
             collected=False             : exec 실패 (exec_status에 원인 분류)
         """
         r = pod_exec(self.v1, self.pod.metadata.name, self.namespace,
-                     ["stat", "-c", "%Y", self.file], timeout=self.exec_timeout)
+                     ["stat", "-c", "%Y", *self.files], timeout=self.exec_timeout)
 
-        if r.status is ExecStatus.OK:
-            try:
-                return HistoryResult(collected=True, mtime=int(r.stdout.strip()))
-            except ValueError:
+        if r.status in (ExecStatus.OK, ExecStatus.COMMAND_FAILED):
+            mtimes = [int(line) for line in r.stdout.split() if line.isdigit()]
+            if mtimes:
+                return HistoryResult(collected=True, mtime=max(mtimes))
+            if r.status is ExecStatus.OK:
                 print(f"[COLLECT-FAIL] {self.pod.metadata.name} history: "
                       f"parse_error ({r.stdout[:120]!r})")
                 return HistoryResult(collected=False, exec_status="parse_error",
                                      detail=r.stdout[:200])
-
-        if r.status is ExecStatus.COMMAND_FAILED:
             if "no such file" in r.stderr.lower():
                 print(f"No bash_history found for pod: {self.pod.metadata.name}")
                 return HistoryResult(collected=True, mtime=None, file_missing=True,
