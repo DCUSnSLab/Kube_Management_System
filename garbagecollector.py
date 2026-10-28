@@ -21,7 +21,7 @@ class GarbageCollector():
         self.namespace: str = namespace
         self.container = container
         self.devMode: bool = isDev
-        self.exclude: list = ["ssh-wldnjs269", "ssh-marsberry", "swlabssh"]
+        self.exclude: list = ["ssh-wldnjs269", "ssh-marsberry", "ssh-min8180", "swlabssh"]
         self.podlist: dict = {}
         self.notRunningPods: dict = {}
         self.intervalTime = 60
