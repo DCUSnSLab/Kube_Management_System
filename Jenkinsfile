@@ -60,6 +60,14 @@ pipeline {
                     kubectl apply -f deploy/gc-deployment.yaml
                     kubectl apply -f deploy/volume-reaper-cronjob.yaml
 
+                    # GC 대상 네임스페이스 등록(라벨·어노테이션)과 네임스페이스별 권한
+                    kubectl apply --server-side --field-manager=kms-gc -f deploy/gc-targets/namespaces.yaml
+                    kubectl apply -f deploy/gc-targets/lablab-workspaces-rbac.yaml
+
+                    # GC 대상 네임스페이스 등록(라벨·어노테이션)과 네임스페이스별 권한
+                    kubectl apply --server-side --field-manager=kms-gc -f deploy/gc-targets/namespaces.yaml
+                    kubectl apply -f deploy/gc-targets/lablab-workspaces-rbac.yaml
+
                     # 이미지 태그 교체 (latest → BUILD_NUMBER-GIT_SHA) 로 롤아웃 트리거
                     kubectl -n ${NAMESPACE} set image deployment/${DEPLOYMENT} \\
                         ${DEPLOYMENT}=${REGISTRY}/${IMAGE}:${IMAGE_TAG}
