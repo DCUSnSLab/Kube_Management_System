@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: garbage-collector-dev
+  namespace: k8s-gc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garbage-collector-dev
+  namespace: swlabpods
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garbage-collector-dev
+  namespace: swlabpods
+subjects:
+  - kind: ServiceAccount
+    name: garbage-collector-dev
+    namespace: k8s-gc
+roleRef:
+  kind: Role
+  name: garbage-collector-dev
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garbage-collector-dev
+  namespace: lablab-workspaces
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garbage-collector-dev
+  namespace: lablab-workspaces
+subjects:
+  - kind: ServiceAccount
+    name: garbage-collector-dev
+    namespace: k8s-gc
+roleRef:
+  kind: Role
+  name: garbage-collector-dev
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garbage-collector-dev-namespace-reader
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garbage-collector-dev-namespace-reader
+subjects:
+  - kind: ServiceAccount
+    name: garbage-collector-dev
+    namespace: k8s-gc
+roleRef:
+  kind: ClusterRole
+  name: garbage-collector-dev-namespace-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garbage-collector-dev
+  namespace: k8s-gc
+  labels:
+    app: garbage-collector-dev
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: garbage-collector-dev
+  template:
+    metadata:
+      labels:
+        app: garbage-collector-dev
+    spec:
+      serviceAccountName: garbage-collector-dev
+      containers:
+        - name: garbage-collector-dev
+          image: harbor.cu.ac.kr/kube_management_system/gc:dev-latest
+          imagePullPolicy: Always
+          env:
+            - name: GC_DELETE
+              value: "false"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: db-config
+              mountPath: /app/config.ini
+              subPath: config.ini
+              readOnly: true
+      volumes:
+        - name: db-config
+          secret:
+            secretName: gc-db-config-dev

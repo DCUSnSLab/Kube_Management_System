@@ -246,7 +246,7 @@ class Pod:
             print(f"No bash_history found for pod: {self.podName}")
             return
 
-        last_saved = get_last_bash_history(self.podName)
+        last_saved = get_last_bash_history(self.podName, self.namespace)
 
         if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
             print(f"New bash_history detected for pod: {self.podName}, saving to DB.")
