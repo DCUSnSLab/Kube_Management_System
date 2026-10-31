@@ -81,8 +81,6 @@ spec:
               env:
                 - name: REAPER_STALE_DAYS
                   value: "90"
-                - name: REAPER_MAX_DELETE
-                  value: "20"
                 - name: REAPER_DELETE
                   value: "true"
               resources:

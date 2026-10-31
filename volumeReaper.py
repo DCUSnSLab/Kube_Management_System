@@ -8,7 +8,6 @@ from DB_postgresql import initialize_database, save_volume_reap, get_pod_deleted
 TARGET_NAMESPACE = os.getenv("REAPER_TARGET_NAMESPACE", "swlabpods")
 LONGHORN_NAMESPACE = "longhorn-system"
 STALE_DAYS = int(os.getenv("REAPER_STALE_DAYS", "90"))
-MAX_DELETE_PER_RUN = int(os.getenv("REAPER_MAX_DELETE", "20"))
 MAX_DELETE_ERRORS = 5
 DELETE_MODE = os.getenv("REAPER_DELETE", "").lower() in ("1", "true", "yes")
 PVC_PREFIX = "ssh-"
@@ -214,9 +213,6 @@ class VolumeReaper:
 
         deleted = errors = 0
         for c in candidates:
-            if deleted >= MAX_DELETE_PER_RUN:
-                print(f"[REAPER] delete cap reached ({MAX_DELETE_PER_RUN}), stopping")
-                break
             try:
                 if self.deleteCandidate(c):
                     deleted += 1
