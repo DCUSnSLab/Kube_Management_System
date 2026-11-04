@@ -14,11 +14,15 @@ class ResourceCollector:
         - 네임스페이스 레벨: 위 항목의 합산 + requests/limits + Pod/PVC 카운트
     """
 
-    def __init__(self, namespace, exclude_list=None):
+    def __init__(self, namespace, exclude_list=None, label_selector=None):
         self.metrics_api = client.CustomObjectsApi()
         self.core_api = client.CoreV1Api()
         self.namespace = namespace
         self.exclude_list = exclude_list or []
+        self.label_selector = label_selector
+
+    def _selector_kwargs(self):
+        return {"label_selector": self.label_selector} if self.label_selector else {}
 
     def collect_and_save(self):
         """CPU/Memory 사용량 1회 수집 → DB 저장"""
@@ -109,7 +113,8 @@ class ResourceCollector:
                 group="metrics.k8s.io",
                 version="v1beta1",
                 namespace=self.namespace,
-                plural="pods"
+                plural="pods",
+                **self._selector_kwargs()
             )
 
             for item in metrics.get('items', []):
@@ -140,7 +145,7 @@ class ResourceCollector:
         """Pod spec에서 requests/limits 값을 추출하여 반환"""
         result = {}
         try:
-            pods = self.core_api.list_namespaced_pod(self.namespace).items
+            pods = self.core_api.list_namespaced_pod(self.namespace, **self._selector_kwargs()).items
             if not pods:
                 return result
 

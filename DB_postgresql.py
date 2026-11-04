@@ -1,7 +1,9 @@
 import psycopg2
+from psycopg2 import pool as pgpool
 import logging
 import configparser
 import os
+import threading
 
 logging.basicConfig(filename="error.log", level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -19,15 +21,68 @@ DATABASE_CONFIG = {
     "port": config["database"]["port"]
 }
 
+_POOL_MAX = max(1, int(os.getenv("GC_DB_POOL_SIZE", "20")))
+_POOL_WAIT_S = int(os.getenv("GC_DB_POOL_WAIT_S", "30"))
+_pool = None
+_pool_lock = threading.Lock()
+_pool_slots = threading.BoundedSemaphore(_POOL_MAX)
+
+
+class _PooledConnection:
+    """풀에서 꺼낸 연결. close()하면 닫지 않고 풀에 반납한다 (기존 호출부의 conn.close() 유지용)"""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._returned = False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            broken = self._conn.closed != 0
+            if not broken:
+                try:
+                    self._conn.rollback()
+                except psycopg2.Error:
+                    broken = True
+            _pool.putconn(self._conn, close=broken)
+        finally:
+            _pool_slots.release()
+
+
+def _get_pool():
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = pgpool.ThreadedConnectionPool(1, _POOL_MAX, **DATABASE_CONFIG, connect_timeout=10)
+        return _pool
+
+
 def get_db_connection():
-    """PostgreSQL connect DB"""
+    """PostgreSQL connect DB (스레드 안전 연결 풀, 최대 GC_DB_POOL_SIZE개)"""
+    if not _pool_slots.acquire(timeout=_POOL_WAIT_S):
+        print(f"[DB-ERROR] connection pool exhausted (waited {_POOL_WAIT_S}s)", flush=True)
+        logging.error("Database connection pool exhausted")
+        return None
     try:
-        return psycopg2.connect(**DATABASE_CONFIG, connect_timeout=10)
+        conn = _get_pool().getconn()
+        if conn.closed:
+            _pool.putconn(conn, close=True)
+            conn = _pool.getconn()
+        return _PooledConnection(conn)
     except psycopg2.Error as e:
+        _pool_slots.release()
         print(f"[DB-ERROR] connection failed "
               f"(host={DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}): {e}", flush=True)
         logging.error(f"Database connection error: {e}")
         return None
+    except Exception:
+        _pool_slots.release()
+        raise
 
 def initialize_database():
     """PostgreSQL 데이터베이스 초기화 및 테이블 생성"""
@@ -279,8 +334,22 @@ def initialize_database():
         if conn:
             conn.close()
 
+_pod_id_locks = {}
+_pod_id_locks_guard = threading.Lock()
+
+
+def _pod_id_lock(pod_name, namespace):
+    with _pod_id_locks_guard:
+        return _pod_id_locks.setdefault((pod_name, namespace), threading.Lock())
+
+
 def get_or_create_pod_id(pod_name, namespace):
-    """pod data check and if existed data return pod_id, else create"""
+    """pod data check and if existed data return pod_id, else create (같은 파드 동시 호출 시 중복 생성 방지)"""
+    with _pod_id_lock(pod_name, namespace):
+        return _get_or_create_pod_id(pod_name, namespace)
+
+
+def _get_or_create_pod_id(pod_name, namespace):
     conn = None
 
     try:
@@ -797,7 +866,7 @@ def save_delete_reason(pod_name, namespace, lifecycle):
             conn.close()
 
 
-def get_last_bash_history(pod_name):
+def get_last_bash_history(pod_name, namespace=None):
     """PostgreSQL에서 해당 pod의 마지막 bash_history 수정 시간을 가져옴"""
     conn = None
 
@@ -809,7 +878,11 @@ def get_last_bash_history(pod_name):
 
         cursor = conn.cursor()
 
-        cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
+        if namespace is None:
+            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
+        else:
+            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;",
+                           (pod_name, namespace))
         pod_id = cursor.fetchone()
 
         if not pod_id:
@@ -848,7 +921,8 @@ def is_deleted_in_DB(pod_name, namespace):
         cursor = conn.cursor()
 
         # all pod_id(same pod) name check
-        cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
+        cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;",
+                       (pod_name, namespace))
         pod_ids = cursor.fetchall()
 
         if not pod_ids:
@@ -886,8 +960,8 @@ def is_exist_in_DB(pod_name, namespace):
         cursor = conn.cursor()
 
         # pod_name이 DB에 존재하는지 확인
-        query = "SELECT EXISTS (SELECT 1 FROM pod_info WHERE pod_name = %s);"
-        cursor.execute(query, (pod_name,))
+        query = "SELECT EXISTS (SELECT 1 FROM pod_info WHERE pod_name = %s AND namespace = %s);"
+        cursor.execute(query, (pod_name, namespace))
         result = cursor.fetchone()
 
         return result[0] if result else False  # True or False 반환

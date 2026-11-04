@@ -21,7 +21,7 @@ def run_gc(ns, sc, log_q=None, iactThr=None):
         sys.stdout = QueueWriter(log_q, ns, "stdout")
         sys.stderr = QueueWriter(log_q, ns, "stderr")
 
-    gc = GarbageCollector(namespace=ns, isDev=False, stop_event=sc, Inactive_Threshold_s=iactThr)
+    gc = GarbageCollector(namespaces=[ns], stop_event=sc, Inactive_Threshold_s=iactThr)
     gc.manage()
 
 

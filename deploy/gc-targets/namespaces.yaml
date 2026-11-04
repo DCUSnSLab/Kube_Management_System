@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: swlabpods
+  labels:
+    kms-gc/enabled: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lablab-workspaces
+  labels:
+    kms-gc/enabled: "true"
+  annotations:
+    kms-gc/pod-selector: "lablab.role=workspace"
+    kms-gc/protect-labels: "lablab.exam"
