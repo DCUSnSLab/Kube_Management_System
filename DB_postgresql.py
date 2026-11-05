@@ -326,6 +326,25 @@ def initialize_database():
         );
         """)
 
+        # pod current Table (파드당 1행, 매 사이클 UPSERT. 외부 시스템은 이 표만 읽음)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pod_current (
+            namespace VARCHAR(255) NOT NULL,
+            pod_name VARCHAR(255) NOT NULL,
+            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            phase VARCHAR(20),
+            status VARCHAR(20),
+            history_last_modified TIMESTAMP,
+            history_inactive BOOLEAN,
+            process_inactive BOOLEAN,
+            inactive_since TIMESTAMP,
+            description TEXT,
+            pod_created_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (namespace, pod_name)
+        );
+        """)
+
         conn.commit()
 
     except psycopg2.Error as e:
@@ -349,6 +368,24 @@ def get_or_create_pod_id(pod_name, namespace):
         return _get_or_create_pod_id(pod_name, namespace)
 
 
+def _find_live_pod_id(cursor, pod_name, namespace=None):
+    """같은 이름으로 쌓인 pod_info 행 중 현재 살아 있는 인스턴스의 pod_id 반환
+    (lifecycle이 없거나 deleted_at이 비어 있는 행. 여러 개면 최신 행). 없으면 None"""
+    ns_cond = "" if namespace is None else "AND pi.namespace = %s "
+    params = (pod_name,) if namespace is None else (pod_name, namespace)
+    cursor.execute(f"""
+        SELECT pi.pod_id FROM pod_info pi
+        LEFT JOIN LATERAL (
+            SELECT deleted_at FROM pod_lifecycle
+            WHERE pod_id = pi.pod_id ORDER BY created_at DESC LIMIT 1
+        ) l ON true
+        WHERE pi.pod_name = %s {ns_cond}AND l.deleted_at IS NULL
+        ORDER BY pi.pod_id DESC LIMIT 1;
+    """, params)
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
 def _get_or_create_pod_id(pod_name, namespace):
     conn = None
 
@@ -360,35 +397,14 @@ def _get_or_create_pod_id(pod_name, namespace):
 
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;
-        """, (pod_name, namespace))
-        pod_ids = cursor.fetchall()
-
-        if pod_ids:
-            for (pod_id,) in pod_ids:
-                # all pod_id's lifecycle check
-                cursor.execute("""
-                    SELECT deleted_at FROM pod_lifecycle
-                    WHERE pod_id = %s ORDER BY created_at DESC LIMIT 1;
-                """, (pod_id,))
-                lifecycle = cursor.fetchone()
-
-                if lifecycle is None:
-                    # lifecycle 정보가 없다면 살아있는 것으로 간주
-                    logging.info(f"Pod {pod_name} has no lifecycle info. Using pod_id: {pod_id}")
-                    print("lifecycle 데이터가 없으므로, 기존 id 반환합니다.")
-                    return pod_id
-                elif lifecycle[0] is None:
-                    # delete time is None -> not deleted pod
-                    logging.info(f"Pod {pod_name} is active. Using pod_id: {pod_id}")
-                    print("기존 id 반환합니다.")
-                    return pod_id
-
-            # All pod_id have deleted time -> create pod info
-            logging.info(f"All existing pods with name {pod_name} are deleted. Creating new pod entry.")
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
+        if pod_id is not None:
+            logging.info(f"Pod {pod_name} is active. Using pod_id: {pod_id}")
+            print("기존 id 반환합니다.")
+            return pod_id
 
         # No exist or deleted
+        logging.info(f"No live pod_info for {pod_name}. Creating new pod entry.")
         print("새로 만듭니다")
         cursor.execute("""
         INSERT INTO pod_info (pod_name, namespace) 
@@ -693,6 +709,109 @@ def save_volume_reap(pvc_name, namespace, size_gi, last_pod_ref_at, action, deta
             conn.close()
 
 
+def upsert_pod_current(pod_name, namespace, record):
+    """
+    파드의 현재 상태를 pod_current에 저장 (네임스페이스+이름당 1행, 있으면 덮어씀)
+    record = {phase, status, history_last_modified, history_inactive, process_inactive,
+              inactive_since, description, pod_created_at}
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+        INSERT INTO pod_current (
+            namespace, pod_name, pod_id, phase, status, history_last_modified,
+            history_inactive, process_inactive, inactive_since, description,
+            pod_created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (namespace, pod_name) DO UPDATE SET
+            pod_id = EXCLUDED.pod_id,
+            phase = EXCLUDED.phase,
+            status = EXCLUDED.status,
+            history_last_modified = EXCLUDED.history_last_modified,
+            history_inactive = EXCLUDED.history_inactive,
+            process_inactive = EXCLUDED.process_inactive,
+            inactive_since = EXCLUDED.inactive_since,
+            description = EXCLUDED.description,
+            pod_created_at = EXCLUDED.pod_created_at,
+            updated_at = CURRENT_TIMESTAMP;
+        """, (
+            namespace, pod_name, pod_id, record.get('phase'), record.get('status'),
+            record.get('history_last_modified'), record.get('history_inactive'),
+            record.get('process_inactive'), record.get('inactive_since'),
+            record.get('description'), record.get('pod_created_at'),
+        ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current upsert): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def delete_pod_current(pod_name, namespace):
+    """pod_current에서 파드 행 제거 (파드 삭제·소멸 시)"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM pod_current WHERE namespace = %s AND pod_name = %s;",
+                       (namespace, pod_name))
+        conn.commit()
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current delete): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def prune_pod_current(namespace, keep_pod_names):
+    """이번 사이클에 보이지 않은 파드의 pod_current 행 제거 (GC 재시작 사이 사라진 파드 정리)"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM pod_current WHERE namespace = %s AND NOT (pod_name = ANY(%s));",
+                       (namespace, list(keep_pod_names)))
+        removed = cursor.rowcount
+        conn.commit()
+        return removed
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current prune): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
 def save_gc_decision(pod_name, namespace, record):
     """
     GC 삭제 판정 저장
@@ -786,12 +905,21 @@ def save_bash_history(pod_name, namespace, last_modified):
 
         pod_id = get_or_create_pod_id(pod_name, namespace)
 
+        # 같은 인스턴스의 마지막 기록과 값이 같으면 저장하지 않음
         cursor.execute("""
         INSERT INTO bash_history (pod_id, last_modified)
-        VALUES (%s, %s);
-        """, (pod_id, last_modified))
+        SELECT %s, %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM (
+                SELECT last_modified FROM bash_history
+                WHERE pod_id = %s ORDER BY id DESC LIMIT 1
+            ) latest WHERE latest.last_modified = %s::timestamp
+        );
+        """, (pod_id, last_modified, pod_id, last_modified))
+        inserted = cursor.rowcount == 1
 
         conn.commit()
+        return inserted
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")
     finally:
@@ -878,17 +1006,10 @@ def get_last_bash_history(pod_name, namespace=None):
 
         cursor = conn.cursor()
 
-        if namespace is None:
-            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
-        else:
-            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;",
-                           (pod_name, namespace))
-        pod_id = cursor.fetchone()
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
 
-        if not pod_id:
-            return None  # pod_name이 DB에 없으면 None 반환
-
-        pod_id = pod_id[0]  # 실제 pod_id 값 추출
+        if pod_id is None:
+            return None  # 살아 있는 인스턴스가 DB에 없으면 None 반환
 
         cursor.execute("""
         SELECT last_modified FROM bash_history WHERE pod_id = %s ORDER BY id DESC LIMIT 1;
@@ -988,18 +1109,12 @@ def update_pod_lifecycle_creation_if_empty(pod_name, namespace, creation_timesta
 
         cursor = conn.cursor()
 
-        # pod_id 조회
-        cursor.execute("""
-            SELECT pod_id FROM pod_info
-            WHERE pod_name = %s AND namespace = %s;
-        """, (pod_name, namespace))
-        result = cursor.fetchone()
+        # 살아 있는 인스턴스의 pod_id 조회
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
 
-        if not result:
-            logging.warning(f"Pod not found in pod_info: {pod_name} ({namespace})")
+        if pod_id is None:
+            logging.warning(f"Live pod not found in pod_info: {pod_name} ({namespace})")
             return
-
-        pod_id = result[0]
 
         # created_at 값 확인
         cursor.execute("""

@@ -10,14 +10,15 @@ from DB_postgresql import (
     save_pod_status,
     save_pod_lifecycle,
     save_to_process,
-    get_last_bash_history,
     save_bash_history,
     save_delete_reason,
     is_deleted_in_DB, is_exist_in_DB,
     update_pod_lifecycle_creation_if_empty,
     save_pod_analysis,
     save_pod_exec_failure,
-    save_gc_decision
+    save_gc_decision,
+    upsert_pod_current,
+    delete_pod_current,
 )
 
 from datetime import datetime, timezone, timedelta, time
@@ -246,11 +247,8 @@ class Pod:
             print(f"No bash_history found for pod: {self.podName}")
             return
 
-        last_saved = get_last_bash_history(self.podName, self.namespace)
-
-        if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
+        if save_bash_history(self.podName, self.namespace, last_modified_time):
             print(f"New bash_history detected for pod: {self.podName}, saving to DB.")
-            save_bash_history(self.podName, self.namespace, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.podName}, skipping DB save.")
 
@@ -624,6 +622,50 @@ class Pod:
             "executed": executed,
             "note": note,
         })
+
+    STATUS_ACTIVE = "active"            # 두 조건 모두 미충족 (또는 나이 8일 미만)
+    STATUS_CANDIDATE = "candidate"      # 히스토리·프로세스 중 하나만 비활성
+    STATUS_RECLAIM = "reclaim"          # 둘 다 비활성 -> 회수 대상
+    STATUS_EXEC_FAILED = "exec_failed"  # exec 하드 실패 누적 중
+    STATUS_PROTECTED = "protected"      # 보호 라벨
+    STATUS_NOT_RUNNING = "not_running"  # Running이 아닌 파드
+
+    def currentStatus(self, should_gc, cause):
+        """shouldGarbageCollection 결과를 pod_current.status로 변환. 수집 실패로 판정 못 한 사이클은 None"""
+        if cause == 'exec_failure' or self.execFailCount:
+            return self.STATUS_EXEC_FAILED
+        if self.isActiveResultCommandHistory is None or self.isActiveResultProcess is None:
+            return None
+        if should_gc:
+            return self.STATUS_RECLAIM
+        if (not self.isActiveResultCommandHistory) != (not self.isActiveResultProcess):
+            return self.STATUS_CANDIDATE
+        return self.STATUS_ACTIVE
+
+    def savePodCurrentToDB(self, status, description=None):
+        """파드의 현재 상태를 pod_current에 UPSERT"""
+        if status is None:
+            return
+        inactive_since = self.podInactiveSince.get(self.podName)
+        if inactive_since is not None:
+            inactive_since = datetime.fromtimestamp(inactive_since, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        history_last = None
+        if self.timeBashHistory is not None:
+            history_last = self.hm.checkTimestamp(self.timeBashHistory)
+        evaluated = self.isActiveResultCommandHistory is not None and self.isActiveResultProcess is not None
+        upsert_pod_current(self.podName, self.namespace, {
+            "phase": getattr(self.pod.status, "phase", None),
+            "status": status,
+            "history_last_modified": history_last,
+            "history_inactive": (not self.isActiveResultCommandHistory) if evaluated else None,
+            "process_inactive": (not self.isActiveResultProcess) if evaluated else None,
+            "inactive_since": inactive_since,
+            "description": description if description is not None else self.processStateDescription,
+            "pod_created_at": self.pod.metadata.creation_timestamp,
+        })
+
+    def removePodCurrentFromDB(self):
+        delete_pod_current(self.podName, self.namespace)
 
     def shouldGarbageCollection(self):
         """

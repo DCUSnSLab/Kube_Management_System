@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from kubernetes import client, config
 from pod import Pod
-from DB_postgresql import initialize_database
+from DB_postgresql import initialize_database, prune_pod_current
 from resourceCollector import ResourceCollector
 
 from datetime import datetime, timezone, timedelta
@@ -102,6 +102,17 @@ class NamespaceGC():
                 except Exception as e:
                     self.log(f"[WARN] Fail to analyze pod {p_name}: {e}")
 
+        # 현재 상태 표 갱신: 판정된 파드 + 보호·비실행 파드, 이번 사이클에 없는 파드는 제거
+        for p_name, p_obj, should_gc, gc_reason, cause in decisions:
+            p_obj.savePodCurrentToDB(p_obj.currentStatus(should_gc, cause),
+                                     gc_reason if gc_reason != 'active' else None)
+        for p_name, p_obj in self.protectedPods.items():
+            p_obj.savePodCurrentToDB(Pod.STATUS_PROTECTED, "protected by label")
+        for p_name, p_obj in self.notRunningPods.items():
+            p_obj.savePodCurrentToDB(Pod.STATUS_NOT_RUNNING, f"phase={p_obj.pod.status.phase}")
+        prune_pod_current(self.namespace,
+                          set(self.podlist) | set(self.protectedPods) | set(self.notRunningPods))
+
         exec_fail_deletes = sum(1 for d in decisions if d[2] and d[4] == 'exec_failure')
         breaker = (exec_fail_deletes >= 3 and exec_fail_deletes > len(self.podlist) // 2)
         if breaker:
@@ -130,6 +141,7 @@ class NamespaceGC():
                 p_obj.insert_DeleteReason(gc_reason)
                 p_obj.save_DeleteReason_to_DB()
                 p_obj.saveGcDecisionToDB(cause, gc_reason, True, True, "")
+                p_obj.removePodCurrentFromDB()
             except Exception as e:
                 self.log(f"[ERROR] {p_name}: {e}")
                 p_obj.saveGcDecisionToDB(cause, gc_reason, True, False, str(e)[:200])
@@ -218,6 +230,7 @@ class NamespaceGC():
                 last_phase = getattr(pod_obj.pod.status, "phase", None)
                 pod_obj.insert_DeleteReason(f"UNKNOWN - Pod deleted (last_phase={last_phase})")
                 pod_obj.save_DeleteReason_to_DB()
+            pod_obj.removePodCurrentFromDB()
             self.log(f"Pod removed: {rm_p}")
 
     def deletePod(self, p_name, expected_uid=None):
