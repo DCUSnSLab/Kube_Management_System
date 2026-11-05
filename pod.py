@@ -10,7 +10,6 @@ from DB_postgresql import (
     save_pod_status,
     save_pod_lifecycle,
     save_to_process,
-    get_last_bash_history,
     save_bash_history,
     save_delete_reason,
     is_deleted_in_DB, is_exist_in_DB,
@@ -246,11 +245,8 @@ class Pod:
             print(f"No bash_history found for pod: {self.podName}")
             return
 
-        last_saved = get_last_bash_history(self.podName, self.namespace)
-
-        if last_saved is None or str(last_saved).strip() != str(last_modified_time).strip():
+        if save_bash_history(self.podName, self.namespace, last_modified_time):
             print(f"New bash_history detected for pod: {self.podName}, saving to DB.")
-            save_bash_history(self.podName, self.namespace, last_modified_time)
         else:
             print(f"No changes in bash_history for pod: {self.podName}, skipping DB save.")
 

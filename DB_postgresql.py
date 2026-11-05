@@ -349,6 +349,24 @@ def get_or_create_pod_id(pod_name, namespace):
         return _get_or_create_pod_id(pod_name, namespace)
 
 
+def _find_live_pod_id(cursor, pod_name, namespace=None):
+    """같은 이름으로 쌓인 pod_info 행 중 현재 살아 있는 인스턴스의 pod_id 반환
+    (lifecycle이 없거나 deleted_at이 비어 있는 행. 여러 개면 최신 행). 없으면 None"""
+    ns_cond = "" if namespace is None else "AND pi.namespace = %s "
+    params = (pod_name,) if namespace is None else (pod_name, namespace)
+    cursor.execute(f"""
+        SELECT pi.pod_id FROM pod_info pi
+        LEFT JOIN LATERAL (
+            SELECT deleted_at FROM pod_lifecycle
+            WHERE pod_id = pi.pod_id ORDER BY created_at DESC LIMIT 1
+        ) l ON true
+        WHERE pi.pod_name = %s {ns_cond}AND l.deleted_at IS NULL
+        ORDER BY pi.pod_id DESC LIMIT 1;
+    """, params)
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
 def _get_or_create_pod_id(pod_name, namespace):
     conn = None
 
@@ -360,35 +378,14 @@ def _get_or_create_pod_id(pod_name, namespace):
 
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;
-        """, (pod_name, namespace))
-        pod_ids = cursor.fetchall()
-
-        if pod_ids:
-            for (pod_id,) in pod_ids:
-                # all pod_id's lifecycle check
-                cursor.execute("""
-                    SELECT deleted_at FROM pod_lifecycle
-                    WHERE pod_id = %s ORDER BY created_at DESC LIMIT 1;
-                """, (pod_id,))
-                lifecycle = cursor.fetchone()
-
-                if lifecycle is None:
-                    # lifecycle 정보가 없다면 살아있는 것으로 간주
-                    logging.info(f"Pod {pod_name} has no lifecycle info. Using pod_id: {pod_id}")
-                    print("lifecycle 데이터가 없으므로, 기존 id 반환합니다.")
-                    return pod_id
-                elif lifecycle[0] is None:
-                    # delete time is None -> not deleted pod
-                    logging.info(f"Pod {pod_name} is active. Using pod_id: {pod_id}")
-                    print("기존 id 반환합니다.")
-                    return pod_id
-
-            # All pod_id have deleted time -> create pod info
-            logging.info(f"All existing pods with name {pod_name} are deleted. Creating new pod entry.")
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
+        if pod_id is not None:
+            logging.info(f"Pod {pod_name} is active. Using pod_id: {pod_id}")
+            print("기존 id 반환합니다.")
+            return pod_id
 
         # No exist or deleted
+        logging.info(f"No live pod_info for {pod_name}. Creating new pod entry.")
         print("새로 만듭니다")
         cursor.execute("""
         INSERT INTO pod_info (pod_name, namespace) 
@@ -786,12 +783,21 @@ def save_bash_history(pod_name, namespace, last_modified):
 
         pod_id = get_or_create_pod_id(pod_name, namespace)
 
+        # 같은 인스턴스의 마지막 기록과 값이 같으면 저장하지 않음
         cursor.execute("""
         INSERT INTO bash_history (pod_id, last_modified)
-        VALUES (%s, %s);
-        """, (pod_id, last_modified))
+        SELECT %s, %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM (
+                SELECT last_modified FROM bash_history
+                WHERE pod_id = %s ORDER BY id DESC LIMIT 1
+            ) latest WHERE latest.last_modified = %s::timestamp
+        );
+        """, (pod_id, last_modified, pod_id, last_modified))
+        inserted = cursor.rowcount == 1
 
         conn.commit()
+        return inserted
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error: {e}")
     finally:
@@ -878,17 +884,10 @@ def get_last_bash_history(pod_name, namespace=None):
 
         cursor = conn.cursor()
 
-        if namespace is None:
-            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s;", (pod_name,))
-        else:
-            cursor.execute("SELECT pod_id FROM pod_info WHERE pod_name = %s AND namespace = %s;",
-                           (pod_name, namespace))
-        pod_id = cursor.fetchone()
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
 
-        if not pod_id:
-            return None  # pod_name이 DB에 없으면 None 반환
-
-        pod_id = pod_id[0]  # 실제 pod_id 값 추출
+        if pod_id is None:
+            return None  # 살아 있는 인스턴스가 DB에 없으면 None 반환
 
         cursor.execute("""
         SELECT last_modified FROM bash_history WHERE pod_id = %s ORDER BY id DESC LIMIT 1;
@@ -988,18 +987,12 @@ def update_pod_lifecycle_creation_if_empty(pod_name, namespace, creation_timesta
 
         cursor = conn.cursor()
 
-        # pod_id 조회
-        cursor.execute("""
-            SELECT pod_id FROM pod_info
-            WHERE pod_name = %s AND namespace = %s;
-        """, (pod_name, namespace))
-        result = cursor.fetchone()
+        # 살아 있는 인스턴스의 pod_id 조회
+        pod_id = _find_live_pod_id(cursor, pod_name, namespace)
 
-        if not result:
-            logging.warning(f"Pod not found in pod_info: {pod_name} ({namespace})")
+        if pod_id is None:
+            logging.warning(f"Live pod not found in pod_info: {pod_name} ({namespace})")
             return
-
-        pod_id = result[0]
 
         # created_at 값 확인
         cursor.execute("""
