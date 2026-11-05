@@ -326,6 +326,25 @@ def initialize_database():
         );
         """)
 
+        # pod current Table (파드당 1행, 매 사이클 UPSERT. 외부 시스템은 이 표만 읽음)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pod_current (
+            namespace VARCHAR(255) NOT NULL,
+            pod_name VARCHAR(255) NOT NULL,
+            pod_id INTEGER REFERENCES pod_info(pod_id) ON DELETE CASCADE,
+            phase VARCHAR(20),
+            status VARCHAR(20),
+            history_last_modified TIMESTAMP,
+            history_inactive BOOLEAN,
+            process_inactive BOOLEAN,
+            inactive_since TIMESTAMP,
+            description TEXT,
+            pod_created_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (namespace, pod_name)
+        );
+        """)
+
         conn.commit()
 
     except psycopg2.Error as e:
@@ -684,6 +703,109 @@ def save_volume_reap(pvc_name, namespace, size_gi, last_pod_ref_at, action, deta
         conn.commit()
     except psycopg2.Error as e:
         logging.error(f"PostgreSQL Error (volume_reap_log): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def upsert_pod_current(pod_name, namespace, record):
+    """
+    파드의 현재 상태를 pod_current에 저장 (네임스페이스+이름당 1행, 있으면 덮어씀)
+    record = {phase, status, history_last_modified, history_inactive, process_inactive,
+              inactive_since, description, pod_created_at}
+    """
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+
+        pod_id = get_or_create_pod_id(pod_name, namespace)
+
+        cursor.execute("""
+        INSERT INTO pod_current (
+            namespace, pod_name, pod_id, phase, status, history_last_modified,
+            history_inactive, process_inactive, inactive_since, description,
+            pod_created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (namespace, pod_name) DO UPDATE SET
+            pod_id = EXCLUDED.pod_id,
+            phase = EXCLUDED.phase,
+            status = EXCLUDED.status,
+            history_last_modified = EXCLUDED.history_last_modified,
+            history_inactive = EXCLUDED.history_inactive,
+            process_inactive = EXCLUDED.process_inactive,
+            inactive_since = EXCLUDED.inactive_since,
+            description = EXCLUDED.description,
+            pod_created_at = EXCLUDED.pod_created_at,
+            updated_at = CURRENT_TIMESTAMP;
+        """, (
+            namespace, pod_name, pod_id, record.get('phase'), record.get('status'),
+            record.get('history_last_modified'), record.get('history_inactive'),
+            record.get('process_inactive'), record.get('inactive_since'),
+            record.get('description'), record.get('pod_created_at'),
+        ))
+
+        conn.commit()
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current upsert): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def delete_pod_current(pod_name, namespace):
+    """pod_current에서 파드 행 제거 (파드 삭제·소멸 시)"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM pod_current WHERE namespace = %s AND pod_name = %s;",
+                       (namespace, pod_name))
+        conn.commit()
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current delete): {e}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def prune_pod_current(namespace, keep_pod_names):
+    """이번 사이클에 보이지 않은 파드의 pod_current 행 제거 (GC 재시작 사이 사라진 파드 정리)"""
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            logging.error("Database connection failed")
+            return None
+
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM pod_current WHERE namespace = %s AND NOT (pod_name = ANY(%s));",
+                       (namespace, list(keep_pod_names)))
+        removed = cursor.rowcount
+        conn.commit()
+        return removed
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"PostgreSQL Error (pod_current prune): {e}")
     finally:
         if conn:
             cursor.close()
